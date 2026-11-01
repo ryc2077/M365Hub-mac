@@ -67,7 +67,12 @@ jobs:
       # signs in at microsoft.com/devicelogin with the code this step
       # prints to the job log while it polls the callback (up to 13 min).
       # No account credential is stored in the repo or the workflow.
+      # The device code is also posted to an issue (see the script), so
+      # pass the token explicitly: $GITHUB_TOKEN is not set in run steps
+      # on its own.
       - name: Real account test
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/test-real-account.sh build/Build/Products/Debug/M365Hub.app
 
       - name: Collect test evidence

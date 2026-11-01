@@ -99,7 +99,7 @@ echo "== wait for the operator sign-in (one long-poll callback) =="
 # with a long timeout is the right shape; the old 40x30s loop only ever
 # cut the long-poll off (http 000) and burned the code's lifetime.
 ADDED=0
-curl -s -m 600 -b "$JAR" -X POST "$BASE/api/auth/callback" \
+curl -s -m 840 -b "$JAR" -X POST "$BASE/api/auth/callback" \
   -H 'Content-Type: application/json' \
   -d "{\"flow\":\"device\",\"userCode\":\"$USER_CODE\"}" \
   -o "$TMP/a5.json" -w "%{http_code}" > "$TMP/a5.code"
