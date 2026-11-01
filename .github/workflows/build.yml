@@ -58,6 +58,14 @@ jobs:
       - name: Account add and chat test
         run: bash scripts/test-account-chat.sh build/Build/Products/Debug/M365Hub.app
 
+      # Real-account test: add a Microsoft 365 account through the
+      # device-code flow and send one real chat message. The operator
+      # signs in at microsoft.com/devicelogin with the code this step
+      # prints to the job log while it polls the callback (up to 13 min).
+      # No account credential is stored in the repo or the workflow.
+      - name: Real account test
+        run: bash scripts/test-real-account.sh build/Build/Products/Debug/M365Hub.app
+
       - name: Collect test evidence
         if: always()
         run: |
@@ -66,6 +74,8 @@ jobs:
           cp "${RUNNER_TEMP}/m365hub-app-shot-late.png" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-account-chat-shot.png" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-account-chat-summary.txt" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-real-account-shot.png" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-real-account-summary.txt" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-gateway-test/serve-test.log" test-evidence/ 2>/dev/null || true
           cp "$HOME/.config/m365hub/serve-mac.log" test-evidence/ 2>/dev/null || true
           ls -la test-evidence/
