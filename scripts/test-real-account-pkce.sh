@@ -26,6 +26,12 @@ SUMMARY="$TMP/m365hub-real-account-pkce-summary.txt"
 ADMIN_PASS="ci-test-pass-20261101"
 REPO="ryc2077/M365Hub-mac"
 FAIL=0
+# Set here, not inside the PKCE branch: when the account is already
+# present the login round trip is skipped, but the tail of the script
+# still references ISSUE_NUM (to close the issue), and set -u makes an
+# unset variable fatal. (Mac CI run 20 died on this after the chat
+# failure, masking the real result.)
+ISSUE_NUM=""
 : > "$SUMMARY"
 
 note() { echo "$1" | tee -a "$SUMMARY"; }
@@ -101,7 +107,6 @@ echo "PKCE-AUTH-URL: $AUTH_URL" | tee -a "$SUMMARY"
 [ -n "$AUTH_URL" ] || fail "PKCE start returned no authUrl"
 
 # Post the auth URL to an issue and wait for the callback URL as a comment.
-ISSUE_NUM=""
 if [ -n "${GITHUB_TOKEN:-}" ]; then
   ISSUE_BODY="Open this URL in a browser and sign in as copilot@wt3z38wld.onmicrosoft.com. After sign-in the browser lands on the nativeclient page; copy the FULL address-bar URL (it contains code= and state=) and post it as a comment on this issue, nothing else. The runner polls comments for up to 9 minutes (the pending login expires 10 minutes after the start).
 
