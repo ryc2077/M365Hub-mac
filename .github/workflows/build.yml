@@ -62,18 +62,21 @@ jobs:
       - name: Account add and chat test
         run: bash scripts/test-account-chat.sh build/Build/Products/Debug/M365Hub.app
 
-      # Real-account test: add a Microsoft 365 account through the
-      # device-code flow and send one real chat message. The operator
-      # signs in at microsoft.com/devicelogin with the code this step
-      # prints to the job log while it polls the callback (up to 13 min).
+      # Real-account test via PKCE: add a Microsoft 365 account through
+      # the browser PKCE flow and send one real chat message. PKCE uses
+      # the Office web Copilot client, not the FOCI "Microsoft Office"
+      # client the device-code flow uses, so a Conditional Access policy
+      # that blocks the latter may still allow this. The operator signs
+      # in with the auth URL from the issue and posts the callback URL
+      # back as a comment; the script polls for it (see the script).
       # No account credential is stored in the repo or the workflow.
-      # The device code is also posted to an issue (see the script), so
-      # pass the token explicitly: $GITHUB_TOKEN is not set in run steps
-      # on its own.
+      # The auth URL goes out through an issue (see the script), so pass
+      # the token explicitly: $GITHUB_TOKEN is not set in run steps on
+      # its own.
       - name: Real account test
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash scripts/test-real-account.sh build/Build/Products/Debug/M365Hub.app
+        run: bash scripts/test-real-account-pkce.sh build/Build/Products/Debug/M365Hub.app
 
       - name: Collect test evidence
         if: always()
@@ -85,6 +88,8 @@ jobs:
           cp "${RUNNER_TEMP}/m365hub-account-chat-summary.txt" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-real-account-shot.png" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-real-account-summary.txt" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-real-account-pkce-shot.png" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-real-account-pkce-summary.txt" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-gateway-test/serve-test.log" test-evidence/ 2>/dev/null || true
           cp "$HOME/.config/m365hub/serve-mac.log" test-evidence/ 2>/dev/null || true
           ls -la test-evidence/
