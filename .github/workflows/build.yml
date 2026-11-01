@@ -111,6 +111,15 @@ jobs:
       - name: CodeX tool-call test
         run: bash scripts/test-codex-mac.sh
 
+      # Desktop-flow test: the CLI (gpt-4-auto) calls tools fine, but the
+      # user's desktop CodeX (default model gpt-6.1-sol-reasoning) only
+      # talks about a plan and never acts. Test the reasoning model on
+      # its own, through the same gateway, on both API shapes a desktop
+      # client could use, plus the CLI with that model. Relaunches the
+      # app itself (the CodeX step quits it) and quits it on the way out.
+      - name: Desktop flow test
+        run: bash scripts/test-desktop-flow.sh build/Build/Products/Debug/M365Hub.app
+
       # Save the gateway data dir (now holding the real account) for the
       # next run. Only when an account is actually in it, so a failed
       # run can never overwrite the good cache with an empty data dir.
@@ -154,6 +163,9 @@ jobs:
           cp "${RUNNER_TEMP}"/codex*.log test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/codex-mac-test/hello.txt" test-evidence/codex-hello.txt 2>/dev/null || true
           cp "${RUNNER_TEMP}/codex-mac-test/tools/"*.txt test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-desktop-flow-summary.txt" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}"/desktop-p*.log test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/codex-reasoning-test/reasoning-model.txt" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-gateway-test/serve-test.log" test-evidence/ 2>/dev/null || true
           cp "$HOME/.config/m365hub/serve-mac.log" test-evidence/ 2>/dev/null || true
           ls -la test-evidence/
