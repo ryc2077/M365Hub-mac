@@ -151,9 +151,9 @@ jobs:
           cp "${RUNNER_TEMP}/m365hub-real-account-pkce-shot.png" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-real-account-pkce-summary.txt" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-codex-mac-summary.txt" test-evidence/ 2>/dev/null || true
-          cp "${RUNNER_TEMP}/codex1.log" test-evidence/ 2>/dev/null || true
-          cp "${RUNNER_TEMP}/codex2.log" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}"/codex*.log test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/codex-mac-test/hello.txt" test-evidence/codex-hello.txt 2>/dev/null || true
+          cp "${RUNNER_TEMP}/codex-mac-test/tools/"*.txt test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-gateway-test/serve-test.log" test-evidence/ 2>/dev/null || true
           cp "$HOME/.config/m365hub/serve-mac.log" test-evidence/ 2>/dev/null || true
           ls -la test-evidence/

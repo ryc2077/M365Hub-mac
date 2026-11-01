@@ -176,6 +176,126 @@ else
   tail -n 20 "$TMP/codex2.log" | tee -a "$SUMMARY"
 fi
 
+echo "== CodeX tools coverage: every supported tool, one round each =="
+# The user's Mac Codex kept replying with a plan and calling no tools at
+# all, so this section proves each tool actually fires through this
+# gateway, one round per tool, with the effect verified on disk (not by
+# the model claiming it). --json (when this codex build has it) gives a
+# JSONL transcript; scripts/codex_tools.py lists the function_call names
+# in it, so we know exactly which tool the model used for each round.
+TOOLS_PY="scripts/codex_tools.py"
+[ -f "$TOOLS_PY" ] || TOOLS_PY=""
+JSON=""
+echo "$HELP" | grep -q -e "--json" && JSON="--json"
+[ -n "$JSON" ] && pass "codex exec supports --json (tool names will be recorded)" \
+  || note "codex exec has no --json flag here; tool names cannot be recorded, disk effects still verify the work"
+tools_used() { # $1 = log file; prints space-separated tool names, or empty
+  if [ -n "$JSON" ] && [ -n "$TOOLS_PY" ]; then
+    "$PY" "$TOOLS_PY" "$1" 2>/dev/null | tr '\n' ' ' | sed 's/ $//'
+  fi
+}
+tool_called() { # $1 = tools string, $2 = tool name
+  case " $1 " in *" $2 "*) return 0;; *) return 1;; esac
+}
+TOOLS_DIR="$WORKDIR/tools"
+mkdir -p "$TOOLS_DIR"
+cd "$TOOLS_DIR"
+
+echo "== round 3: shell tool (uname) =="
+run_timeout 300 codex exec $APPROVE $SKIP $JSON "Run the shell command uname -s and write its output (exactly one word, no extra text) into a file named shell-os.txt in the current directory." < /dev/null > "$TMP/codex3.log" 2>&1
+T3_TOOLS="$(tools_used "$TMP/codex3.log")"
+[ -n "$T3_TOOLS" ] && note "round 3 tools used: $T3_TOOLS"
+if [ -f "$TOOLS_DIR/shell-os.txt" ] && [ "$(cat "$TOOLS_DIR/shell-os.txt" | tr -d '[:space:]')" = "Darwin" ]; then
+  pass "round 3: shell tool wrote shell-os.txt (Darwin)"
+  tool_called "$T3_TOOLS" "shell" && pass "round 3: shell tool call recorded" \
+    || { [ -n "$JSON" ] && fail "round 3: shell tool call NOT recorded (tools: $T3_TOOLS)"; }
+else
+  fail "round 3: shell-os.txt missing or wrong"
+  tail -n 20 "$TMP/codex3.log" | tee -a "$SUMMARY"
+fi
+
+echo "== round 4: apply_patch create =="
+run_timeout 300 codex exec $APPROVE $SKIP $JSON "Use the file editing tool (apply_patch) to create a new file named patch-created.txt in the current directory with exactly these two lines: first-patch-line and second-patch-line. Do not use shell commands to create the file." < /dev/null > "$TMP/codex4.log" 2>&1
+T4_TOOLS="$(tools_used "$TMP/codex4.log")"
+[ -n "$T4_TOOLS" ] && note "round 4 tools used: $T4_TOOLS"
+if grep -q "first-patch-line" "$TOOLS_DIR/patch-created.txt" 2>/dev/null && grep -q "second-patch-line" "$TOOLS_DIR/patch-created.txt" 2>/dev/null; then
+  pass "round 4: patch-created.txt exists with both lines"
+  tool_called "$T4_TOOLS" "apply_patch" && pass "round 4: apply_patch call recorded" \
+    || { [ -n "$JSON" ] && fail "round 4: apply_patch call NOT recorded (tools: $T4_TOOLS)"; }
+else
+  fail "round 4: patch-created.txt missing or wrong"
+  tail -n 20 "$TMP/codex4.log" | tee -a "$SUMMARY"
+fi
+
+echo "== round 5: apply_patch edit =="
+run_timeout 300 codex exec $APPROVE $SKIP $JSON "Use the file editing tool (apply_patch) to change the second line of patch-created.txt to second-patch-line-edited. Do not use shell commands to edit the file." < /dev/null > "$TMP/codex5.log" 2>&1
+T5_TOOLS="$(tools_used "$TMP/codex5.log")"
+[ -n "$T5_TOOLS" ] && note "round 5 tools used: $T5_TOOLS"
+if grep -q "second-patch-line-edited" "$TOOLS_DIR/patch-created.txt" 2>/dev/null; then
+  pass "round 5: second line edited in place"
+  tool_called "$T5_TOOLS" "apply_patch" && pass "round 5: apply_patch call recorded" \
+    || { [ -n "$JSON" ] && fail "round 5: apply_patch call NOT recorded (tools: $T5_TOOLS)"; }
+else
+  fail "round 5: patch-created.txt was not edited"
+  cat "$TOOLS_DIR/patch-created.txt" 2>&1 | tee -a "$SUMMARY"
+  tail -n 20 "$TMP/codex5.log" | tee -a "$SUMMARY"
+fi
+
+echo "== round 6: read tool =="
+run_timeout 300 codex exec $APPROVE $SKIP $JSON "Read the file patch-created.txt with the file reading tool and tell me its second line in your reply." < /dev/null > "$TMP/codex6.log" 2>&1
+T6_TOOLS="$(tools_used "$TMP/codex6.log")"
+[ -n "$T6_TOOLS" ] && note "round 6 tools used: $T6_TOOLS"
+if grep -q "second-patch-line-edited" "$TMP/codex6.log"; then
+  pass "round 6: model read the file and reported the edited second line"
+else
+  fail "round 6: model did not report the edited second line"
+  tail -n 20 "$TMP/codex6.log" | tee -a "$SUMMARY"
+fi
+
+echo "== round 7: apply_patch delete =="
+run_timeout 300 codex exec $APPROVE $SKIP $JSON "Use the file editing tool (apply_patch) to delete the file shell-os.txt in the current directory." < /dev/null > "$TMP/codex7.log" 2>&1
+T7_TOOLS="$(tools_used "$TMP/codex7.log")"
+[ -n "$T7_TOOLS" ] && note "round 7 tools used: $T7_TOOLS"
+if [ ! -f "$TOOLS_DIR/shell-os.txt" ]; then
+  pass "round 7: shell-os.txt deleted"
+  tool_called "$T7_TOOLS" "apply_patch" && pass "round 7: apply_patch call recorded" \
+    || { [ -n "$JSON" ] && fail "round 7: apply_patch call NOT recorded (tools: $T7_TOOLS)"; }
+else
+  fail "round 7: shell-os.txt still exists"
+  tail -n 20 "$TMP/codex7.log" | tee -a "$SUMMARY"
+fi
+
+echo "== round 8: web_search probe (informational only) =="
+run_timeout 300 codex exec $APPROVE $SKIP $JSON "Search the web for the latest released version of the OpenAI Codex CLI and tell me the version number you found." < /dev/null > "$TMP/codex8.log" 2>&1
+T8_TOOLS="$(tools_used "$TMP/codex8.log")"
+[ -n "$T8_TOOLS" ] && note "round 8 tools used: $T8_TOOLS"
+# Informational: the gateway may not implement web search at all, and
+# that is a finding to report (and fix), not a reason to fail the run.
+# A FAIL here would mask the core tools result.
+if tool_called "$T8_TOOLS" "web_search"; then
+  note "round 8: web_search IS supported through this gateway"
+elif grep -qiE "0\.[0-9]+\.[0-9]+" "$TMP/codex8.log"; then
+  note "round 8: model reported a version number without a web_search call (may be from memory)"
+else
+  note "round 8: web_search was NOT called (gateway may not implement it)"
+fi
+
+echo "== round 9: multi-step task (update_plan) =="
+run_timeout 300 codex exec $APPROVE $SKIP $JSON "Do these three steps in order: 1) create plan-a.txt containing exactly the word apple, 2) create plan-b.txt containing exactly the word banana, 3) create plan-c.txt containing exactly the word cherry. Report each step as you finish it." < /dev/null > "$TMP/codex9.log" 2>&1
+T9_TOOLS="$(tools_used "$TMP/codex9.log")"
+[ -n "$T9_TOOLS" ] && note "round 9 tools used: $T9_TOOLS"
+if [ "$(cat "$TOOLS_DIR/plan-a.txt" 2>/dev/null | tr -d '[:space:]')" = "apple" ] \
+  && [ "$(cat "$TOOLS_DIR/plan-b.txt" 2>/dev/null | tr -d '[:space:]')" = "banana" ] \
+  && [ "$(cat "$TOOLS_DIR/plan-c.txt" 2>/dev/null | tr -d '[:space:]')" = "cherry" ]; then
+  pass "round 9: all three files created with the right words"
+  tool_called "$T9_TOOLS" "update_plan" && note "round 9: update_plan call recorded" \
+    || note "round 9: update_plan was NOT called (model did the steps without it)"
+else
+  fail "round 9: plan-a/b/c.txt missing or wrong"
+  ls -la "$TOOLS_DIR" | tee -a "$SUMMARY"
+  tail -n 20 "$TMP/codex9.log" | tee -a "$SUMMARY"
+fi
+
 echo "== summary =="
 cat "$SUMMARY"
 if [ "$FAIL" = "0" ]; then echo "CODEX-MAC-TEST: PASS"; exit 0
