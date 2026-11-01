@@ -124,9 +124,16 @@ done
 
 echo "== PKCE callback =="
 if [ -n "$CALLBACK_URL" ]; then
+  # Build the JSON body in a variable first: nesting a double-quoted
+  # python -c call inside "$(...)" inside curl's -d "..." breaks on the
+  # runner's shell (the dict braces get brace-expanded and python sees
+  # two mangled fragments). The same build-then-pass shape already works
+  # for the issue creation above.
+  CALLBACK_JSON=$(python3 -c "import json,sys; print(json.dumps({'flow':'pkce','callbackUrl':sys.argv[1]}))" "$CALLBACK_URL")
+  [ -n "$CALLBACK_JSON" ] || fail "could not build the callback JSON body"
   curl -s -m 60 -b "$JAR" -X POST "$BASE/api/auth/callback" \
     -H 'Content-Type: application/json' \
-    -d "$(python3 -c "import json,sys; print(json.dumps({'flow':'pkce','callbackUrl':sys.argv[1]}))" "$CALLBACK_URL")" \
+    -d "$CALLBACK_JSON" \
     -o "$TMP/p5.json" -w "%{http_code}" > "$TMP/p5.code"
   if [ "$(cat "$TMP/p5.code")" = "200" ]; then
     echo "ACCOUNT-ADDED: $(cat "$TMP/p5.json")" | tee -a "$SUMMARY"
