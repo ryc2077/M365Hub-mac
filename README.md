@@ -39,6 +39,11 @@ macOS 26+ 上走 SwiftUI `.glassEffect(.regular)`（真折射 + 高光 + 形变�
 - 1.0.10 修 ContentView 编译超时：`body` 一个 Group 里塞了分栏、历史列表、九路详情切换，
   类型检查器算不过来（unable to type-check in reasonable time），拆成 mainView / sidebar /
   detailView 三个独立的计算属性，各自检查。
+- 1.0.13（2026-11-01）：CI 账号/对话测试的两处“失败”是测试断言写错了，不是 app 的错——
+  网关的错误体是嵌套的 `{"error":{"message":...}}`，对话没账号时控制台接口按设计返回
+  502 upstream_error（503 no_account 只在数据面接口上）。测试按实际口径改了断言；
+  另修 app 的报错提取：以前嵌套错误体取不到 message，聊天里只显示干巴巴的“HTTP 502”，
+  现在会显示真正的原因（比如 accounts: no healthy account available）。
 - 1.0.12 修启动死锁（2026-11-01）：打开 app 永远卡在“正在启动本地网关…”。
   根因：`GatewayManager.start()` 只在 ContentView 的 onAppear 里调，而 ContentView
   要等 `gateway.ready` 变真才出现，`ready` 又只有 start() 跑起来才会变真——鸡生蛋死锁，

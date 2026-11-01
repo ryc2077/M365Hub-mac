@@ -104,8 +104,10 @@ curl -s -m 60 -b "$JAR" -X POST "$BASE/api/auth/callback" \
   -d '{"flow":"pkce","callbackUrl":"https://localhost/callback?code=bogus&state=x"}' \
   -o "$TMP/r8.json" -w "%{http_code}" > "$TMP/r8.code"
 expect_code "POST /api/auth/callback (bogus)" 400 "$(cat "$TMP/r8.code")"
-[ "$(jget "$TMP/r8.json" "['error']")" = "auth_failed" ] \
-  && pass "bogus callback -> auth_failed" || fail "callback: $(cat "$TMP/r8.json")"
+# writeErr nests the error: {"error":{"code","message","type"}}.
+[ "$(jget "$TMP/r8.json" "['error']['type']")" = "auth_failed" ] \
+  && pass "bogus callback -> auth_failed (pkce verifier missing)" \
+  || fail "callback: $(cat "$TMP/r8.json")"
 
 echo "== 9. auth status: still zero accounts =="
 curl -s -m 10 -b "$JAR" "$BASE/api/auth/status" -o "$TMP/r9.json"
@@ -113,14 +115,20 @@ curl -s -m 10 -b "$JAR" "$BASE/api/auth/status" -o "$TMP/r9.json"
   && pass "auth status count=0" || fail "auth status: $(cat "$TMP/r9.json")"
 
 echo "== 10. chat with zero accounts fails cleanly =="
+# Console /api/chat maps every RunChat error (except unknown_account) to
+# 502 upstream_error; the 503 no_account shape lives on the data plane.
+# Zero accounts -> ErrNoAccount -> 502 "accounts: no healthy account available".
 curl -s -m 30 -b "$JAR" -X POST "$BASE/api/chat" \
   -H 'Content-Type: application/json' \
   -d '{"model":"gpt-6.1-sol-reasoning","messages":[{"role":"user","content":"你好"}],"attachments":[]}' \
   -o "$TMP/r10.json" -w "%{http_code}" > "$TMP/r10.code"
-expect_code "POST /api/chat (no accounts)" 503 "$(cat "$TMP/r10.code")"
-[ "$(jget "$TMP/r10.json" "['error']")" = "no_account" ] \
-  && pass "chat -> 503 no_account (wired, fails gracefully)" \
-  || fail "chat: $(cat "$TMP/r10.json")"
+expect_code "POST /api/chat (no accounts)" 502 "$(cat "$TMP/r10.code")"
+if [ "$(jget "$TMP/r10.json" "['error']['type']")" = "upstream_error" ] \
+   && grep -q "no healthy account" "$TMP/r10.json"; then
+  pass "chat -> 502 upstream_error, no healthy account (wired, fails gracefully)"
+else
+  fail "chat: $(cat "$TMP/r10.json")"
+fi
 
 echo "== screenshot + quit =="
 screencapture -x "$TMP/m365hub-account-chat-shot.png" 2>/dev/null || echo "screencapture failed"

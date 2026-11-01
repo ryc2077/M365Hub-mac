@@ -28,7 +28,13 @@ enum API {
                     json = obj
                 }
                 if code >= 400 {
-                    let msg = (json["message"] as? String) ?? (json["error"] as? String) ?? "HTTP \(code)"
+                    // writeErr nests the error: {"error":{"message":...}}.
+                    // Without the nested lookup the chat only ever showed
+                    // a bare "HTTP 502" instead of the real reason.
+                    let msg = (json["message"] as? String)
+                        ?? (json["error"] as? [String: Any])?["message"] as? String
+                        ?? (json["error"] as? String)
+                        ?? "HTTP \(code)"
                     completion(.failure(NSError(domain: "m365hub", code: code,
                                                 userInfo: [NSLocalizedDescriptionKey: msg])))
                 } else {
