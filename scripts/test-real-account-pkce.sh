@@ -172,9 +172,8 @@ else
   fail "chat content empty: $(cat "$TMP/p8.json" | head -c 500)"
 fi
 
-echo "== screenshot + quit =="
+echo "== screenshot (the app stays running: the gateway is handed off to the CodeX test, which quits the app when it is done) =="
 screencapture -x "$TMP/m365hub-real-account-pkce-shot.png" 2>/dev/null || echo "screencapture failed"
-osascript -e 'tell application "M365Hub" to quit' 2>/dev/null || pkill -f "M365Hub.app" || true
 sleep 2
 if [ -n "$ISSUE_NUM" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
   gh_api "/issues/$ISSUE_NUM" -X PATCH -d '{"state":"closed"}' >/dev/null 2>&1 || true

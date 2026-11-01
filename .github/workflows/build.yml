@@ -78,6 +78,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/test-real-account-pkce.sh build/Build/Products/Debug/M365Hub.app
 
+      # CodeX tool-call test: run the Codex CLI against the same gateway
+      # the PKCE step just added the real account to, in YOLO mode, and
+      # prove it really writes files (create hello.txt, append a line,
+      # cat it). The PKCE step leaves the app running so this step can
+      # reuse its gateway; this step quits the app when it is done. Same
+      # shape as the Windows test (green on its run 21).
+      - name: CodeX tool-call test
+        run: bash scripts/test-codex-mac.sh
+
       - name: Collect test evidence
         if: always()
         run: |
@@ -90,6 +99,10 @@ jobs:
           cp "${RUNNER_TEMP}/m365hub-real-account-summary.txt" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-real-account-pkce-shot.png" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-real-account-pkce-summary.txt" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-codex-mac-summary.txt" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/codex1.log" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/codex2.log" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/codex-mac-test/hello.txt" test-evidence/codex-hello.txt 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-gateway-test/serve-test.log" test-evidence/ 2>/dev/null || true
           cp "$HOME/.config/m365hub/serve-mac.log" test-evidence/ 2>/dev/null || true
           ls -la test-evidence/
