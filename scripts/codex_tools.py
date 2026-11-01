@@ -1,21 +1,45 @@
 #!/usr/bin/env python3
-"""List the distinct tool (function_call) names in a `codex exec --json` log.
+"""List the distinct tool names used in a `codex exec --json` log.
 
 Usage: codex_tools.py <logfile>
 Prints one tool name per line, sorted. Prints nothing when the log has
-no function_call items (plain output, or the model called nothing).
+no tool-call items (plain output, or the model called nothing).
 
-The JSONL shape varies across codex versions, so every object is walked
-recursively and any dict with type == "function_call" and a "name" counts.
+Codex CLI 0.166.0 --json emits one JSON object per line; tool calls
+appear as {"type": "item.started"|"item.completed",
+"item": {"type": "<tool-type>", ...}}. The tool types seen so far:
+  command_execution -> shell (the model runs /bin/bash -lc '...')
+  file_change       -> apply_patch (item.changes lists path + kind)
+No separate read item type was observed: the model reads files through
+the shell (e.g. sed -n '2p' file). No web_search or plan item type
+appeared in Mac CI run 21 either, so those tools are reported only if
+a matching item type ever shows up.
+The older function_call shape (type == "function_call" with a "name")
+is still accepted, in case a future codex version emits it.
 """
 import json
 import sys
+
+# CLI --json item type -> tool name shown in the test summary.
+ITEM_TOOL = {
+    "command_execution": "shell",
+    "file_change": "apply_patch",
+    "web_search": "web_search",
+    "web_search_call": "web_search",
+    "plan": "update_plan",
+    "update_plan": "update_plan",
+}
 
 
 def walk(o, out):
     if isinstance(o, dict):
         if o.get("type") == "function_call" and o.get("name"):
             out.add(str(o["name"]))
+        item = o.get("item")
+        if isinstance(item, dict):
+            tool = ITEM_TOOL.get(str(item.get("type", "")))
+            if tool:
+                out.add(tool)
         for v in o.values():
             walk(v, out)
     elif isinstance(o, list):
