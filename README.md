@@ -33,6 +33,9 @@ macOS 26+ 上走 SwiftUI `.glassEffect(.regular)`（真折射 + 高光 + 形变�
 - 1.0.8 修 MathView 的公式尺寸：`sizeThatFits` 只在 SwiftMath 的 main 分支有，正式版 1.7.3
   的 macOS 标签没有它，改成 `fittingSize`（1.7.3 在 macOS 上重写了这个属性，值就是排版尺寸，
   且它是 AppKit 自带的属性，换哪个 SwiftMath 版本都编得过）。
+- 1.0.9 修 ChatView 的文件选择：单文件版 `.fileImporter` 回的是 `Result<URL, Error>`，
+  但 `handlePicked` 要的是 `Result<[URL], Error>`，改成 `allowsMultipleSelection: true`
+  的多选版（顺带支持一次选多个附件）。
 - 这个工程是在 Linux 上写的，**没有经过 Xcode 编译**，第一次在 Mac 上
   Build 是验收步骤：若有 API 细节报错（例如 glassEffect 的 SDK 版本），
   按 Xcode 的提示改 Glass.swift 里的 availability 门即可，逻辑不用动。

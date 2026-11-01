@@ -143,10 +143,10 @@ struct ChatView: View {
             .padding()
         }
         .onAppear { loadModels() }
-        .fileImporter(isPresented: $showImagePicker, allowedContentTypes: [.image]) { result in
+        .fileImporter(isPresented: $showImagePicker, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
             handlePicked(result, asImage: true)
         }
-        .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.item]) { result in
+        .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             handlePicked(result, asImage: false)
         }
     }
