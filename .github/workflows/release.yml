@@ -54,7 +54,16 @@ jobs:
           mv app-download/Contents M365Hub.app/Contents
           test -x M365Hub.app/Contents/MacOS/M365Hub
           test -x M365Hub.app/Contents/Resources/m365hub
-          zip -qr "$ZIP" M365Hub.app
+          # The CI build is unsigned (CODE_SIGNING_ALLOWED=NO). A fully
+          # unsigned app downloaded from the internet is reported by
+          # Gatekeeper as "damaged". Ad-hoc signing does not make it
+          # trusted, but it makes the bundle verifiable, so Gatekeeper
+          # shows the bypassable "unverified developer" prompt instead
+          # of "damaged". ditto is Apple's recommended way to zip an
+          # .app (preserves resource forks and symlinks; zip does not).
+          codesign --force --sign - --deep M365Hub.app
+          codesign --verify --deep --strict M365Hub.app
+          ditto -c -k --sequesterRsrc --keepParent M365Hub.app "$ZIP"
           ls -la "$ZIP"
           TAG="v${VERSION}"
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -65,7 +74,7 @@ jobs:
               --title "M365Hub macOS ${VERSION}" \
               --notes "Prebuilt macOS app from CI build run ${RUN_ID} (all green: build, gateway cold start, app launch, account add and chat, real-account PKCE + real Chinese chat, CodeX tool calls).
 
-          Install: unzip, drag M365Hub.app to Applications. Unsigned Debug build: first launch right-click -> Open; if macOS says it is damaged, run: xattr -cr /Applications/M365Hub.app
+          Install: unzip, drag M365Hub.app to Applications. The app is ad-hoc signed, not notarized: first launch right-click -> Open, then Open in the dialog. If macOS still says it is damaged, strip the download quarantine flag in Terminal: xattr -cr /Applications/M365Hub.app (or drag the app into the Terminal window after typing xattr -cr), then open it again.
           First login: admin password is admin123 (forced change on first login)."
           fi
           echo "Release: $(gh release view "$TAG" --json url --jq .url)"
