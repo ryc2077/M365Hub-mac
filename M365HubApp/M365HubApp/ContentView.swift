@@ -105,7 +105,7 @@ struct ContentView: View {
 
     private var sidebar: some View {
         List(selection: $section) {
-            Section("历史对话") {
+            SwiftUI.Section("历史对话") {
                 Button("＋ 新对话") { _ = store.newConversation(); section = .chat }
                 ForEach(store.conversations) { c in
                     HStack {
@@ -121,7 +121,7 @@ struct ContentView: View {
                     }
                 }
             }
-            Section("功能") {
+            SwiftUI.Section("功能") {
                 ForEach(Section.allCases.filter { $0 != .chat }) { s in
                     Text(s.rawValue).tag(s)
                 }

@@ -39,6 +39,9 @@ macOS 26+ 上走 SwiftUI `.glassEffect(.regular)`（真折射 + 高光 + 形变�
 - 1.0.10 修 ContentView 编译超时：`body` 一个 Group 里塞了分栏、历史列表、九路详情切换，
   类型检查器算不过来（unable to type-check in reasonable time），拆成 mainView / sidebar /
   detailView 三个独立的计算属性，各自检查。
+- 1.0.11 修同名遮挡：本文件的 `enum Section` 盖住了 SwiftUI 的 `Section`，
+  侧边栏的 `Section("历史对话")` 被当成枚举初始化、多余的尾随闭包报错，
+  改成 `SwiftUI.Section` 全写（`Section.allCases` / `Section.chat` 仍指枚举，不动）。
 - 这个工程是在 Linux 上写的，**没有经过 Xcode 编译**，第一次在 Mac 上
   Build 是验收步骤：若有 API 细节报错（例如 glassEffect 的 SDK 版本），
   按 Xcode 的提示改 Glass.swift 里的 availability 门即可，逻辑不用动。
