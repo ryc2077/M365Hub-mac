@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
   actions: write
+  # The real-account test posts the short-lived device code to an issue so
+  # the operator can read it instantly (job logs lag ~20 minutes); the
+  # issue is closed by the test script when it finishes.
+  issues: write
 
 jobs:
   build:

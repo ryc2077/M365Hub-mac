@@ -75,25 +75,48 @@ USER_CODE="$(jget "$TMP/a4.json" "['userCode']")"
 AUTH_URL="$(jget "$TMP/a4.json" "['authUrl']")"
 echo "DEVICE-CODE: $USER_CODE" | tee -a "$SUMMARY"
 echo "DEVICE-URL: $AUTH_URL" | tee -a "$SUMMARY"
-echo "Sign in at https://microsoft.com/devicelogin with the code above; this script polls for up to 13 minutes."
+echo "Sign in at https://microsoft.com/devicelogin with the code above; this script waits for it."
 
-echo "== poll the device callback until the operator signs in =="
+# The job log is too slow to read live (run 12: the code sat in the log for
+# ~20 minutes before it showed up in a download, and the 15-minute code
+# expired first). Post the code to a GitHub issue instead: the issues API
+# reads it back instantly. The code dies in 15 minutes anyway, and the
+# issue is closed at the end of this script.
+ISSUE_NUM=""
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  ISSUE_NUM=$(curl -s -X POST -H "Authorization: Bearer $GITHUB_TOKEN" \
+    -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/ryc2077/M365Hub-mac/issues" \
+    -d "{\"title\":\"Real-account test device code\",\"body\":\"Sign in at https://microsoft.com/devicelogin with code: $USER_CODE (expires in 15 minutes). The runner is waiting on the device callback.\"}" \
+    | python3 -c "import json,sys; print(json.load(sys.stdin).get('number',''))" 2>/dev/null)
+  echo "ISSUE: $ISSUE_NUM" | tee -a "$SUMMARY"
+else
+  echo "no GITHUB_TOKEN; operator must read the code from the job log" | tee -a "$SUMMARY"
+fi
+
+echo "== wait for the operator sign-in (one long-poll callback) =="
+# CompleteDevice long-polls Microsoft until the user approves, so one call
+# with a long timeout is the right shape; the old 40x30s loop only ever
+# cut the long-poll off (http 000) and burned the code's lifetime.
 ADDED=0
-for i in $(seq 1 40); do
-  sleep 20
-  curl -s -m 30 -b "$JAR" -X POST "$BASE/api/auth/callback" \
-    -H 'Content-Type: application/json' \
-    -d "{\"flow\":\"device\",\"userCode\":\"$USER_CODE\"}" \
-    -o "$TMP/a5.json" -w "%{http_code}" > "$TMP/a5.code"
-  if [ "$(cat "$TMP/a5.code")" = "200" ]; then
-    ADDED=1
-    echo "ACCOUNT-ADDED: $(cat "$TMP/a5.json")" | tee -a "$SUMMARY"
-    pass "device callback completed (account added)"
-    break
-  fi
-  echo "poll $i: http $(cat "$TMP/a5.code") $(jget "$TMP/a5.json" "['error']['message']" 2>/dev/null || cat "$TMP/a5.json" | head -c 200)"
-done
-[ "$ADDED" = "1" ] || fail "device callback never completed (operator sign-in missing or expired)"
+curl -s -m 600 -b "$JAR" -X POST "$BASE/api/auth/callback" \
+  -H 'Content-Type: application/json' \
+  -d "{\"flow\":\"device\",\"userCode\":\"$USER_CODE\"}" \
+  -o "$TMP/a5.json" -w "%{http_code}" > "$TMP/a5.code"
+if [ "$(cat "$TMP/a5.code")" = "200" ]; then
+  ADDED=1
+  echo "ACCOUNT-ADDED: $(cat "$TMP/a5.json")" | tee -a "$SUMMARY"
+  pass "device callback completed (account added)"
+else
+  echo "callback result: http $(cat "$TMP/a5.code") $(cat "$TMP/a5.json" | head -c 400)" | tee -a "$SUMMARY"
+  fail "device callback never completed (operator sign-in missing or expired)"
+fi
+if [ -n "$ISSUE_NUM" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
+  curl -s -X PATCH -H "Authorization: Bearer $GITHUB_TOKEN" \
+    -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/ryc2077/M365Hub-mac/issues/$ISSUE_NUM" \
+    -d '{"state":"closed"}' >/dev/null || true
+fi
 
 echo "== accounts list after =="
 curl -s -m 10 -b "$JAR" "$BASE/api/accounts" -o "$TMP/a6.json"
