@@ -1,26 +1,46 @@
 #!/bin/bash
-# Launch the real .app the way a user would, screenshot it, and check
-# whether its own gateway came up. Best effort: never fails the job by
-# itself, the screenshot and logs are the evidence.
+# Launch the real .app the way a user would and watch, for up to 180s,
+# when (if ever) its gateway comes up. Best effort: the screenshots and
+# logs are the evidence; a missing display must not fail the job.
 # Usage: scripts/test-applaunch.sh <path-to-M365Hub.app>
 set -u
 APP="${1:?usage: test-applaunch.sh <M365Hub.app>}"
-SHOT="${RUNNER_TEMP:-/tmp}/m365hub-app-shot.png"
+SHOT1="${RUNNER_TEMP:-/tmp}/m365hub-app-shot.png"
+SHOT2="${RUNNER_TEMP:-/tmp}/m365hub-app-shot-late.png"
 LOG="$HOME/.config/m365hub/serve-mac.log"
+
+echo "== system proxy (URLSession obeys this, curl does not) =="
+scutil --proxy || true
+echo "== proxy env =="
+env | grep -i proxy || echo "no proxy env vars"
 
 echo "== launch the app =="
 open "$APP" || echo "open failed (exit $?)"
-sleep 20
+sleep 5
 
-echo "== screenshot =="
-screencapture -x "$SHOT" && ls -la "$SHOT" || echo "screencapture failed"
+echo "== shell check: does 127.0.0.1:8230 refuse instantly? =="
+curl -v -m 3 http://127.0.0.1:8230/api/admin/session 2>&1 | tail -n 5 || true
+
+echo "== watch for 180s: gateway process / port / log file / login screen =="
+for t in $(seq 10 10 180); do
+  sleep 10
+  LISTENING=$(lsof -i :8230 2>/dev/null | grep -c LISTEN || true)
+  LOGSTATE="missing"
+  [ -f "$LOG" ] && LOGSTATE="exists ($(wc -c < "$LOG" 2>/dev/null || echo 0) bytes)"
+  SESSION=$(curl -s -o /dev/null -w "%{http_code}" -m 2 http://127.0.0.1:8230/api/admin/session || echo "curl-failed")
+  echo "t=${t}s listening=$LISTENING serve-mac.log=$LOGSTATE session=http:$SESSION"
+  if [ "$LISTENING" != "0" ] && [ "$SESSION" != "000" ] && [ "$SESSION" != "curl-failed" ]; then
+    echo "gateway is up at t=${t}s"
+    break
+  fi
+done
+
+echo "== screenshot (late) =="
+screencapture -x "$SHOT2" && ls -la "$SHOT2" || echo "screencapture failed"
+screencapture -x "$SHOT1" && ls -la "$SHOT1" || echo "screencapture failed"
 
 echo "== processes =="
 ps aux | grep -i "[m]365hub" || true
-echo "== port 8230 =="
-lsof -i :8230 2>/dev/null || echo "nothing listening on 8230"
-echo "== session endpoint =="
-curl -s -m 3 http://127.0.0.1:8230/api/admin/session; echo
 echo "== gateway log written by the app =="
 cat "$LOG" 2>/dev/null || echo "no serve-mac.log yet"
 echo "== quit the app =="

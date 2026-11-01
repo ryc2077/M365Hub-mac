@@ -54,6 +54,7 @@ jobs:
         run: |
           mkdir -p test-evidence
           cp "${RUNNER_TEMP}/m365hub-app-shot.png" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-app-shot-late.png" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-gateway-test/serve-test.log" test-evidence/ 2>/dev/null || true
           cp "$HOME/.config/m365hub/serve-mac.log" test-evidence/ 2>/dev/null || true
           ls -la test-evidence/
