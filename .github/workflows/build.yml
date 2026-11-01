@@ -168,6 +168,7 @@ jobs:
           cp "${RUNNER_TEMP}/codex-mac-test/tools/"*.txt test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-desktop-flow-summary.txt" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}"/desktop-p*.log test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}"/desktop-p*.json test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/codex-reasoning-test/reasoning-model.txt" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-gateway-test/serve-test.log" test-evidence/ 2>/dev/null || true
           cp "$HOME/.config/m365hub/serve-mac.log" test-evidence/ 2>/dev/null || true

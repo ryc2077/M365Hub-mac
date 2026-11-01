@@ -18,6 +18,10 @@
 #       chat-completions stream dropped tool_calls from its chunk, so a
 #       strict client saw no calls even though the CLI -- which reads the
 #       individual output_item events -- worked fine)
+#   P8: /v1/responses with NO tools at all (the exact shape the desktop
+#       app sends). The gateway must inject the default CodeX tools
+#       (shell/read/apply_patch) so the model still emits a function call
+#       instead of falling back to its own Linux container.
 # If the reasoning model calls tools here, the gateway + model are fine
 # and the fault is in the desktop app itself. If it does not (or takes
 # many minutes to emit a single call), the model is the problem and the
@@ -138,6 +142,29 @@ print("yes" if found else "no")
 [ "$P7_OUT" = "yes" ] \
   && pass "P7: response.completed output contains a function_call" \
   || fail "P7: response.completed output has NO function_call"
+
+# P8: no tools at all (the exact shape the desktop app sends). The gateway
+# must inject the default CodeX tools (shell/read/apply_patch) so the model
+# still emits a function call instead of falling back to its own container.
+echo "== P8: /v1/responses, gpt-6.1-sol-reasoning, NO tools (desktop shape) =="
+P8_PROMPT="Run the shell command uname -s on this machine and report exactly what it printed. Use the shell tool to run it; do not just guess the answer."
+P8_JSON=$("$PY" -c "import json,sys; print(json.dumps({'model':'gpt-6.1-sol-reasoning','input':sys.argv[1],'stream':False}))" "$P8_PROMPT")
+START=$(date +%s)
+curl -s -m 420 -X POST "$BASE/v1/responses" -H "Authorization: Bearer $API_KEY" \
+  -H 'Content-Type: application/json' -d "$P8_JSON" -o "$TMP/desktop-p8.json" -w "%{http_code}" > "$TMP/desktop-p8.code"
+ELAPSED=$(( $(date +%s) - START ))
+echo "P8: http $(cat "$TMP/desktop-p8.code") in ${ELAPSED}s" | tee -a "$SUMMARY"
+P8_OUT=$("$PY" -c '
+import json,sys
+try: d=json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception: print("no"); sys.exit()
+out=d.get("output",[])
+names=[it.get("name") for it in out if isinstance(it,dict) and it.get("type")=="function_call"]
+print("yes" if "shell" in names else "no")
+' "$TMP/desktop-p8.json")
+[ "$P8_OUT" = "yes" ] \
+  && pass "P8: no-tools request still returned a shell function_call in ${ELAPSED}s (default tools injected)" \
+  || fail "P8: no-tools request returned NO shell function_call in ${ELAPSED}s: $(head -c 400 "$TMP/desktop-p8.json")"
 
 # P4: /v1/chat/completions stream, gpt-6.1-sol-reasoning (the other shape
 # a desktop client could use).
