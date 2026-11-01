@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
 // Native admin screens. Each one is a plain SwiftUI view filled from
 // the gateway console API — no web content anywhere in the app.
@@ -62,6 +64,7 @@ struct DashboardView: View {
 struct AccountsView: View {
     @State private var accounts: [[String: Any]] = []
     @State private var error = ""
+    @State private var notice = ""
     @State private var callbackURL = ""
     @State private var authURL = ""
 
@@ -91,6 +94,13 @@ struct AccountsView: View {
             Button("刷新全部账号状态") {
                 API.request("/api/accounts/refresh", method: "POST") { _ in load() }
             }
+            HStack {
+                Button("导出账号") { exportAccounts() }
+                Button("导入账号") { importAccounts() }
+            }
+            Text("导出文件是明文，里面有账号的刷新令牌，拿到文件的人就能用这些账号，存好别外传。")
+                .font(.caption).foregroundStyle(.secondary)
+            if !notice.isEmpty { Text(notice).foregroundStyle(.secondary) }
             ForEach(accounts.indices, id: \.self) { i in
                 let ac = accounts[i]
                 HStack {
@@ -112,22 +122,106 @@ struct AccountsView: View {
             if case .success(let d) = r { accounts = d["accounts"] as? [[String: Any]] ?? [] }
         }
     }
+
+    private func exportAccounts() {
+        notice = ""; error = ""
+        API.request("/api/accounts/export") { r in
+            switch r {
+            case .success(let d):
+                guard let data = try? JSONSerialization.data(
+                    withJSONObject: d, options: [.prettyPrinted, .sortedKeys]) else {
+                    error = "导出失败：网关返回的数据无法保存"
+                    return
+                }
+                let panel = NSSavePanel()
+                panel.nameFieldStringValue = "m365hub-accounts.json"
+                panel.allowedContentTypes = [UTType.json]
+                panel.canCreateDirectories = true
+                if panel.runModal() == .OK, let url = panel.url {
+                    do {
+                        try data.write(to: url)
+                        let n = (d["accounts"] as? [[String: Any]])?.count ?? 0
+                        var msg = "已导出 \(n) 个账号到 \(url.lastPathComponent)"
+                        if let skipped = d["skipped"] as? [String], !skipped.isEmpty {
+                            msg += "，\(skipped.count) 个因令牌无法解密未导出"
+                        }
+                        notice = msg
+                    } catch {
+                        self.error = "保存失败：\(error.localizedDescription)"
+                    }
+                }
+            case .failure(let e):
+                error = e.localizedDescription
+            }
+        }
+    }
+
+    private func importAccounts() {
+        notice = ""; error = ""
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let list = obj["accounts"] as? [[String: Any]] else {
+                error = "导入失败：文件里没有 accounts 列表"
+                return
+            }
+            API.request("/api/accounts/import", method: "POST", body: ["accounts": list]) { r in
+                switch r {
+                case .success(let d):
+                    let n = d["imported"] as? Int ?? 0
+                    let errs = d["errors"] as? [String] ?? []
+                    notice = errs.isEmpty
+                        ? "已导入 \(n) 个账号"
+                        : "已导入 \(n) 个，\(errs.count) 个失败：\(errs.joined(separator: "；"))"
+                    load()
+                case .failure(let e):
+                    error = e.localizedDescription
+                }
+            }
+        } catch {
+            self.error = "读取文件失败：\(error.localizedDescription)"
+        }
+    }
 }
 
 struct KeysView: View {
     @State private var keys: [[String: Any]] = []
     @State private var error = ""
+    @State private var newPlaintext = ""
+    @State private var copied = false
     var body: some View {
         SectionPage(title: "API Keys", subtitle: "给外部客户端用的网关密钥") {
             Button("新建 Key") {
                 API.request("/api/admin/keys", method: "POST", body: ["name": "default"]) { r in
                     if case .success(let d) = r {
+                        newPlaintext = d["plaintext"] as? String ?? ""
+                        copied = false
                         NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(d["plaintext"] as? String ?? "", forType: .string)
+                        NSPasteboard.general.setString(newPlaintext, forType: .string)
                         load()
                     } else if case .failure(let e) = r { error = e.localizedDescription }
                 }
             }
+            // The plaintext exists only at creation: the gateway stores
+            // just a hash afterwards, so an old key can never be shown
+            // again. Show the new key in full until the user leaves.
+            if !newPlaintext.isEmpty {
+                Text("新密钥只显示一次，已复制到剪贴板，也可点下面按钮再复制：")
+                    .foregroundStyle(.secondary)
+                Text(newPlaintext).font(.callout.monospaced()).textSelection(.enabled)
+                Button(copied ? "已复制 ✓" : "复制") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(newPlaintext, forType: .string)
+                    copied = true
+                }
+            }
+            Text("列表里的密钥只存了前 12 位和哈希，完整密钥无法再查看；需要的话删掉重建一个。")
+                .font(.caption).foregroundStyle(.secondary)
             ForEach(keys.indices, id: \.self) { i in
                 let k = keys[i]
                 HStack {
