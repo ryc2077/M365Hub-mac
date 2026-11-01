@@ -35,9 +35,40 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build
 
+      # The app hangs on "正在启动本地网关…" when its gateway never
+      # answers, so the build is not done until the bundled gateway is
+      # proven to start and answer /api/admin/session, cold, the way the
+      # app launches it (fresh data dir, M365_LISTEN=127.0.0.1:8230).
+      - name: Gateway cold-start test
+        run: bash scripts/test-gateway.sh build/Build/Products/Debug/M365Hub.app
+
+      # Launch the real app, screenshot it, and check whether its own
+      # gateway came up. Best effort: the screenshot and logs are the
+      # evidence; a missing display must not hide the gateway result.
+      - name: Launch app and screenshot
+        continue-on-error: true
+        run: bash scripts/test-applaunch.sh build/Build/Products/Debug/M365Hub.app
+
+      - name: Collect test evidence
+        if: always()
+        run: |
+          mkdir -p test-evidence
+          cp "${RUNNER_TEMP}/m365hub-app-shot.png" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-gateway-test/serve-test.log" test-evidence/ 2>/dev/null || true
+          cp "$HOME/.config/m365hub/serve-mac.log" test-evidence/ 2>/dev/null || true
+          ls -la test-evidence/
+
       - name: Upload built app
-        if: success()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: M365Hub-macOS
           path: build/Build/Products/Debug/M365Hub.app
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-test-evidence
+          path: test-evidence/
+          if-no-files-found: warn

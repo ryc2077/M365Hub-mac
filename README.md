@@ -39,6 +39,10 @@ macOS 26+ 上走 SwiftUI `.glassEffect(.regular)`（真折射 + 高光 + 形变�
 - 1.0.10 修 ContentView 编译超时：`body` 一个 Group 里塞了分栏、历史列表、九路详情切换，
   类型检查器算不过来（unable to type-check in reasonable time），拆成 mainView / sidebar /
   detailView 三个独立的计算属性，各自检查。
+- CI 加网关冷启动测试（2026-11-01）：用户反馈打开 app 卡在“正在启动本地网关…”。
+  每次构建后在 Actions 里直接跑包里的网关（全新数据目录、M365_LISTEN=127.0.0.1:8230，
+  和 app 起网关的方式一致），30 秒内必须答上 /api/admin/session，否则构建算失败；
+  另起真实 app 截图一张、连同网关日志一起作为 artifact 留证。
 - 1.0.11 修同名遮挡：本文件的 `enum Section` 盖住了 SwiftUI 的 `Section`，
   侧边栏的 `Section("历史对话")` 被当成枚举初始化、多余的尾随闭包报错，
   改成 `SwiftUI.Section` 全写（`Section.allCases` / `Section.chat` 仍指枚举，不动）。
