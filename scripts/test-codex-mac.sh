@@ -33,6 +33,11 @@ JAR="$TMP/m365hub-codex-mac-cookies.txt"
 SUMMARY="$TMP/m365hub-codex-mac-summary.txt"
 ADMIN_PASS="ci-test-pass-20261101"
 WORKDIR="$TMP/codex-mac-test"
+# Resolve the script's own directory NOW, before any cd: the coverage
+# section runs after `cd "$WORKDIR"`, so a relative "scripts/..." path
+# there no longer exists. (Mac CI runs 21-22: TOOLS_PY went blank and
+# every round reported "tools: " empty.)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 FAIL=0
 : > "$SUMMARY"
 PY="$(command -v python3 || echo python3)"
@@ -181,9 +186,10 @@ echo "== CodeX tools coverage: every supported tool, one round each =="
 # all, so this section proves each tool actually fires through this
 # gateway, one round per tool, with the effect verified on disk (not by
 # the model claiming it). --json (when this codex build has it) gives a
-# JSONL transcript; scripts/codex_tools.py lists the function_call names
-# in it, so we know exactly which tool the model used for each round.
-TOOLS_PY="scripts/codex_tools.py"
+# JSONL transcript; scripts/codex_tools.py lists the tool names in it,
+# so we know exactly which tool the model used for each round.
+# SCRIPT_DIR was resolved at the top, before the cd into $WORKDIR.
+TOOLS_PY="$SCRIPT_DIR/codex_tools.py"
 [ -f "$TOOLS_PY" ] || TOOLS_PY=""
 JSON=""
 echo "$HELP" | grep -q -e "--json" && JSON="--json"
