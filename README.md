@@ -30,6 +30,9 @@ macOS 26+ 上走 SwiftUI `.glassEffect(.regular)`（真折射 + 高光 + 形变�
   旧 SDK 里根本没有这个符号，改成 `#if compiler(>=6.2)` 编译期分支（Xcode 26 走真液态玻璃，
   旧 Xcode 走 ultraThinMaterial）；MathView.swift 的 `sizeToFit()` 是 UIKit 才有的方法，
   macOS 的 SwiftMath 标签改用 `sizeThatFits(.zero)`。Xcode 16 也能编了，想看真折射效果再升 Xcode 26。
+- 1.0.8 修 MathView 的公式尺寸：`sizeThatFits` 只在 SwiftMath 的 main 分支有，正式版 1.7.3
+  的 macOS 标签没有它，改成 `fittingSize`（1.7.3 在 macOS 上重写了这个属性，值就是排版尺寸，
+  且它是 AppKit 自带的属性，换哪个 SwiftMath 版本都编得过）。
 - 这个工程是在 Linux 上写的，**没有经过 Xcode 编译**，第一次在 Mac 上
   Build 是验收步骤：若有 API 细节报错（例如 glassEffect 的 SDK 版本），
   按 Xcode 的提示改 Glass.swift 里的 availability 门即可，逻辑不用动。
