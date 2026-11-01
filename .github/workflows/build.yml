@@ -117,7 +117,10 @@ jobs:
       # its own, through the same gateway, on both API shapes a desktop
       # client could use, plus the CLI with that model. Relaunches the
       # app itself (the CodeX step quits it) and quits it on the way out.
+      # Runs even when the CodeX step fails (if: always), so a flaky
+      # model-choice failure there cannot hide the desktop-flow result.
       - name: Desktop flow test
+        if: always()
         run: bash scripts/test-desktop-flow.sh build/Build/Products/Debug/M365Hub.app
 
       # Save the gateway data dir (now holding the real account) for the

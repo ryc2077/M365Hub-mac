@@ -13,6 +13,11 @@
 #   P2: /v1/responses stream, gpt-6.1-sol-reasoning, tools
 #   P4: /v1/chat/completions stream, gpt-6.1-sol-reasoning, tools
 #   P5: CLI (codex exec) with model gpt-6.1-sol-reasoning, one file write
+#   P7: the response.completed event itself must carry the function_call
+#       (the old stream sent an empty output array there, and the old
+#       chat-completions stream dropped tool_calls from its chunk, so a
+#       strict client saw no calls even though the CLI -- which reads the
+#       individual output_item events -- worked fine)
 # If the reasoning model calls tools here, the gateway + model are fine
 # and the fault is in the desktop app itself. If it does not (or takes
 # many minutes to emit a single call), the model is the problem and the
@@ -111,6 +116,28 @@ fi
 grep -q "response.completed" "$TMP/desktop-p2.log" 2>/dev/null \
   && pass "P2: stream reached response.completed" \
   || fail "P2: stream did NOT reach response.completed"
+
+# P7: the completed event itself must carry the function call. The old
+# stream sent response.completed with an empty output array, so a client
+# that reads tool calls from the completed event (rather than from the
+# individual output_item events, as the CodeX CLI does) saw no calls.
+echo "== P7: response.completed output carries the function_call =="
+P7_OUT=$("$PY" -c '
+import json,sys
+found=False
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    line=line.strip()
+    if line.startswith("data:") and "response.completed" in line:
+        try: payload=json.loads(line[5:])
+        except Exception: continue
+        out=payload.get("response",{}).get("output",[])
+        found=any(isinstance(it,dict) and it.get("type")=="function_call" for it in out)
+        break
+print("yes" if found else "no")
+' "$TMP/desktop-p2.log")
+[ "$P7_OUT" = "yes" ] \
+  && pass "P7: response.completed output contains a function_call" \
+  || fail "P7: response.completed output has NO function_call"
 
 # P4: /v1/chat/completions stream, gpt-6.1-sol-reasoning (the other shape
 # a desktop client could use).
