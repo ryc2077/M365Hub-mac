@@ -39,6 +39,11 @@ macOS 26+ 上走 SwiftUI `.glassEffect(.regular)`（真折射 + 高光 + 形变�
 - 1.0.10 修 ContentView 编译超时：`body` 一个 Group 里塞了分栏、历史列表、九路详情切换，
   类型检查器算不过来（unable to type-check in reasonable time），拆成 mainView / sidebar /
   detailView 三个独立的计算属性，各自检查。
+- 1.0.12 修启动死锁（2026-11-01）：打开 app 永远卡在“正在启动本地网关…”。
+  根因：`GatewayManager.start()` 只在 ContentView 的 onAppear 里调，而 ContentView
+  要等 `gateway.ready` 变真才出现，`ready` 又只有 start() 跑起来才会变真——鸡生蛋死锁，
+  CI 里盯满 180 秒网关一次都没起、日志文件都没生成。修法：启动改到 App 的 WindowGroup
+  onAppear 里调；另把启动探测的超时从默认 120 秒改成 3 秒，冷启动不再白转两分钟。
 - CI 加网关冷启动测试（2026-11-01）：用户反馈打开 app 卡在“正在启动本地网关…”。
   每次构建后在 Actions 里直接跑包里的网关（全新数据目录、M365_LISTEN=127.0.0.1:8230，
   和 app 起网关的方式一致），30 秒内必须答上 /api/admin/session，否则构建算失败；

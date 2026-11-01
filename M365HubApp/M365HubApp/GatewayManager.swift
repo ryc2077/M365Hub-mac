@@ -20,7 +20,10 @@ final class GatewayManager: ObservableObject {
     }
 
     func start() {
-        API.session { [weak self] loggedIn in
+        // Short timeout: a down gateway must fail fast here. The old call
+        // used the 120s request default, so a cold start could spin for
+        // two minutes before spawn even ran.
+        API.session(timeout: 3) { [weak self] loggedIn in
             if loggedIn {
                 // A gateway is already up (or a session exists): adopt it.
                 self?.owned = false

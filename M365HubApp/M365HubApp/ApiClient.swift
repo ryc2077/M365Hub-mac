@@ -9,10 +9,11 @@ enum API {
 
     static func request(_ path: String, method: String = "GET",
                         body: [String: Any]? = nil,
+                        timeout: TimeInterval = 120,
                         completion: @escaping (Result<[String: Any], Error>) -> Void) {
         var req = URLRequest(url: base.appendingPathComponent(path))
         req.httpMethod = method
-        req.timeoutInterval = 120
+        req.timeoutInterval = timeout
         if let body = body {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try? JSONSerialization.data(withJSONObject: body)
@@ -37,8 +38,8 @@ enum API {
         }.resume()
     }
 
-    static func session(completion: @escaping (Bool) -> Void) {
-        request("/api/admin/session") { r in
+    static func session(timeout: TimeInterval = 120, completion: @escaping (Bool) -> Void) {
+        request("/api/admin/session", timeout: timeout) { r in
             if case .success(let d) = r { completion(d["loggedIn"] as? Bool ?? false) }
             else { completion(false) }
         }

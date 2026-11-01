@@ -10,13 +10,19 @@ struct M365HubApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if gateway.ready {
-                ContentView(store: store)
-                    .preferredColorScheme(dark ? .dark : .light)
-            } else {
-                VStack { ProgressView(); Text("正在启动本地网关…") }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Group {
+                if gateway.ready {
+                    ContentView(store: store)
+                        .preferredColorScheme(dark ? .dark : .light)
+                } else {
+                    VStack { ProgressView(); Text("正在启动本地网关…") }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
+            // Startup lives here, not in ContentView.onAppear: ContentView
+            // only exists once gateway.ready is true, so starting there
+            // deadlocked on the spinner forever (1.0.12, proven in CI).
+            .onAppear { gateway.start() }
         }
         .commands {
             CommandGroup(replacing: .newItem) {
@@ -75,7 +81,9 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            GatewayManager.shared.start()
+            // Gateway startup is driven by the App's WindowGroup onAppear:
+            // this view only exists once the gateway is ready, so calling
+            // start() here deadlocked on the spinner (see 1.0.12).
             API.session { loggedIn = $0 }
         }
         .frame(minWidth: 900, minHeight: 600)
