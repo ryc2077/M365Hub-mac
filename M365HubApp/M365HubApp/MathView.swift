@@ -21,9 +21,11 @@ enum MathRender {
         label.labelMode = display ? .display : .text
         label.fontSize = fontSize
         label.textColor = MTColor(Color.primary)
-        // sizeToFit() is UIKit-only; on macOS the label is an NSView and
-        // SwiftMath gives it sizeThatFits/fittingSize instead (same math).
-        label.frame.size = label.sizeThatFits(.zero)
+        // sizeToFit() is UIKit-only, and sizeThatFits(_:) only exists on
+        // SwiftMath main, not the released 1.7.x: on macOS the label is an
+        // NSView, and fittingSize (overridden by SwiftMath 1.7.3 to the
+        // typeset size) exists on every version, so use that.
+        label.frame.size = label.fittingSize
         let size = label.frame.size
         guard size.width > 0, size.height > 0, label.error == nil else { return nil }
         guard let rep = label.bitmapImageRepForCachingDisplay(in: label.bounds) else { return nil }
