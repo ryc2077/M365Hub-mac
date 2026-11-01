@@ -1,0 +1,71 @@
+name: Release macOS app
+
+# Publish the prebuilt app from a green build run as a GitHub release.
+# Trigger it from the Actions tab (or the API) with the version to
+# release; it takes the app from the latest successful build run (or the
+# run id given), rewraps the artifact's Contents/ into M365Hub.app/ and
+# uploads the zip. If the release for the tag already exists, only the
+# asset is uploaded (replacing a same-named one).
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 1.0.13"
+        required: true
+        default: "1.0.13"
+      run_id:
+        description: "Build run id to take the app from (empty = latest successful build run)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the built app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          RUN_ID="${{ inputs.run_id }}"
+          if [ -z "$RUN_ID" ]; then
+            RUN_ID=$(gh api "repos/${{ github.repository }}/actions/workflows/build.yml/runs?status=success&per_page=1" --jq '.workflow_runs[0].id')
+          fi
+          echo "Using build run $RUN_ID"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          mkdir -p app-download
+          gh run download "$RUN_ID" --name M365Hub-macOS --dir app-download
+          ls app-download
+
+      - name: Repackage and publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          VERSION="${{ inputs.version }}"
+          ZIP="M365Hub-${VERSION}-macos.zip"
+          mkdir -p M365Hub.app
+          mv app-download/Contents M365Hub.app/Contents
+          test -x M365Hub.app/Contents/MacOS/M365Hub
+          test -x M365Hub.app/Contents/Resources/m365hub
+          zip -qr "$ZIP" M365Hub.app
+          ls -la "$ZIP"
+          TAG="v${VERSION}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; uploading the asset"
+            gh release upload "$TAG" "$ZIP" --clobber
+          else
+            gh release create "$TAG" "$ZIP" \
+              --title "M365Hub macOS ${VERSION}" \
+              --notes "Prebuilt macOS app from CI build run ${RUN_ID} (all green: build, gateway cold start, app launch, account add and chat, real-account PKCE + real Chinese chat, CodeX tool calls).
+
+          Install: unzip, drag M365Hub.app to Applications. Unsigned Debug build: first launch right-click -> Open; if macOS says it is damaged, run: xattr -cr /Applications/M365Hub.app
+          First login: admin password is admin123 (forced change on first login)."
+          fi
+          echo "Release: $(gh release view "$TAG" --json url --jq .url)"
