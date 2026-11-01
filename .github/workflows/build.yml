@@ -28,7 +28,7 @@ jobs:
       - name: Build (unsigned, CI only)
         run: |
           xcodebuild -project M365HubApp.xcodeproj \
-            -target M365Hub \
+            -scheme M365Hub \
             -configuration Debug \
             -destination 'platform=macOS' \
             -derivedDataPath build \
