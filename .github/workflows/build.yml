@@ -49,12 +49,23 @@ jobs:
         continue-on-error: true
         run: bash scripts/test-applaunch.sh build/Build/Products/Debug/M365Hub.app
 
+      # Account-add + chat, through the exact endpoints the Mac UI calls:
+      # admin login (forced password change), accounts list, PKCE/device
+      # start, bogus callback rejection, and chat with zero accounts.
+      # Completing the Microsoft sign-in needs a human in the browser, so
+      # this proves the flows start and fail cleanly; it cannot mint an
+      # account by itself.
+      - name: Account add and chat test
+        run: bash scripts/test-account-chat.sh build/Build/Products/Debug/M365Hub.app
+
       - name: Collect test evidence
         if: always()
         run: |
           mkdir -p test-evidence
           cp "${RUNNER_TEMP}/m365hub-app-shot.png" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-app-shot-late.png" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-account-chat-shot.png" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-account-chat-summary.txt" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-gateway-test/serve-test.log" test-evidence/ 2>/dev/null || true
           cp "$HOME/.config/m365hub/serve-mac.log" test-evidence/ 2>/dev/null || true
           ls -la test-evidence/
