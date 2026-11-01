@@ -62,6 +62,27 @@ jobs:
       - name: Account add and chat test
         run: bash scripts/test-account-chat.sh build/Build/Products/Debug/M365Hub.app
 
+      # Restore the gateway data dir (~/.config/m365hub: accounts +
+      # tokens) from the previous run, so the real account survives
+      # between runs and the PKCE login round trip is only needed once,
+      # to seed the cache. The account-chat test above runs fresh on
+      # purpose (it proves the no-account flows), so the restore goes
+      # here, after it and before the PKCE step. The app is not running
+      # at this point (the account-chat test quits it), and the fresh
+      # data dir it just created is cleared first so the restore cannot
+      # merge with it. On the first run there is no cache and the
+      # restore is a no-op; the PKCE step then seeds the account.
+      - name: Clear the fresh gateway data dir before restore
+        run: rm -rf "$HOME/.config/m365hub"
+
+      - name: Restore gateway data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.config/m365hub
+          key: m365hub-mac-data-${{ github.run_id }}
+          restore-keys: |
+            m365hub-mac-data-
+
       # Real-account test via PKCE: add a Microsoft 365 account through
       # the browser PKCE flow and send one real chat message. PKCE uses
       # the Office web Copilot client, not the FOCI "Microsoft Office"
@@ -73,6 +94,9 @@ jobs:
       # The auth URL goes out through an issue (see the script), so pass
       # the token explicitly: $GITHUB_TOKEN is not set in run steps on
       # its own.
+      # If the cache restore above already brought the account back, the
+      # script skips the login round trip and only verifies the restored
+      # account still chats.
       - name: Real account test
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -86,6 +110,33 @@ jobs:
       # shape as the Windows test (green on its run 21).
       - name: CodeX tool-call test
         run: bash scripts/test-codex-mac.sh
+
+      # Save the gateway data dir (now holding the real account) for the
+      # next run. Only when an account is actually in it, so a failed
+      # run can never overwrite the good cache with an empty data dir.
+      # The app is quit first (the CodeX step quits it on its way out,
+      # and this step quits it again as a belt-and-braces so the save
+      # cannot catch the gateway mid-write).
+      - name: Check for a saved account
+        id: check-account
+        if: always()
+        run: |
+          osascript -e 'tell application "M365Hub" to quit' 2>/dev/null || pkill -f "M365Hub.app" 2>/dev/null || true
+          sleep 2
+          if grep -q "copilot@wt3z38wld.onmicrosoft.com" "$HOME/.config/m365hub/accounts.json" 2>/dev/null; then
+            echo "has_account=true" >> "$GITHUB_OUTPUT"
+            echo "account present in the data dir; the cache will be saved"
+          else
+            echo "has_account=false" >> "$GITHUB_OUTPUT"
+            echo "no account in the data dir; the cache will NOT be saved"
+          fi
+
+      - name: Save gateway data cache
+        if: always() && steps.check-account.outputs.has_account == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.config/m365hub
+          key: m365hub-mac-data-${{ github.run_id }}
 
       - name: Collect test evidence
         if: always()

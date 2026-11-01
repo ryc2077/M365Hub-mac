@@ -47,6 +47,15 @@ pass() { note "PASS: $1"; }
 # as argv, never interpolated into the -c string.
 jget() { "$PY" -c 'import json,sys; d=json.load(open(sys.argv[1], encoding="utf-8")); v=eval("d"+sys.argv[2]); print(v if not isinstance(v,bool) else str(v).lower())' "$1" "$2" 2>/dev/null; }
 
+# macOS has no `timeout` command (BSD userland; exit 127), so run a
+# command with a deadline the portable way: GNU timeout when it exists,
+# otherwise perl's alarm (perl ships with macOS and the runner).
+run_timeout() {
+  local secs="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then timeout "$secs" "$@";
+  else perl -e 'alarm shift; exec @ARGV' "$secs" "$@"; fi
+}
+
 # The PKCE script left the app (and its gateway) running; this script
 # quits the app on the way out, success or failure.
 quit_app() {
@@ -125,7 +134,7 @@ pass "codex config written ($HOME/.codex/config.toml)"
 echo "== CodeX tool call, round 1: create hello.txt =="
 rm -rf "$WORKDIR"; mkdir -p "$WORKDIR"
 cd "$WORKDIR" && git init -q 2>/dev/null || true
-timeout 300 codex exec $APPROVE $SKIP "Create a file named hello.txt in the current directory containing exactly one line: codex-via-m365hub-mac-ok. Do not write anything else into the file." < /dev/null > "$TMP/codex1.log" 2>&1
+run_timeout 300 codex exec $APPROVE $SKIP "Create a file named hello.txt in the current directory containing exactly one line: codex-via-m365hub-mac-ok. Do not write anything else into the file." < /dev/null > "$TMP/codex1.log" 2>&1
 echo "codex round 1 exit: $?" | tee -a "$SUMMARY"
 # The session header must show approval: never, or the guardian path
 # is back and the run will fail the same way Windows run 17 did.
@@ -150,7 +159,7 @@ fi
 
 echo "== CodeX tool call, round 2: append + cat =="
 cd "$WORKDIR"
-timeout 300 codex exec $APPROVE $SKIP "Append a second line, second-line, to hello.txt in the current directory, then print the file contents with cat." < /dev/null > "$TMP/codex2.log" 2>&1
+run_timeout 300 codex exec $APPROVE $SKIP "Append a second line, second-line, to hello.txt in the current directory, then print the file contents with cat." < /dev/null > "$TMP/codex2.log" 2>&1
 echo "codex round 2 exit: $?" | tee -a "$SUMMARY"
 # Substring match on purpose: round 1's file may have no trailing
 # newline (the model may use printf without \n to satisfy "exactly one

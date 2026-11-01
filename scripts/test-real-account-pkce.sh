@@ -68,11 +68,29 @@ else
   fi
 fi
 
+echo "== is an account already present (restored from the previous run's cache)? =="
+# The workflow restores ~/.config/m365hub from the previous run, so the
+# real account may already be there. Its tokens are encrypted with the
+# gateway's built-in fallback key (the app sets no M365_MASTER_KEY), so
+# a restored data dir decrypts on any runner. If the account is there,
+# the PKCE login round trip is skipped entirely and this step only
+# verifies the restored account still chats.
+ACCOUNT_PRESENT="0"
+curl -s -m 10 -b "$JAR" "$BASE/api/auth/status" -o "$TMP/p0.json"
+COUNT="$(jget "$TMP/p0.json" "['count']")"
+if [ -n "$COUNT" ] && [ "$COUNT" != "None" ] && [ "$COUNT" != "0" ]; then
+  ACCOUNT_PRESENT="1"
+  note "account already present (count=$COUNT, restored from cache); skipping the PKCE login round trip"
+else
+  note "no account yet; doing the PKCE login round trip"
+fi
+
 echo "== accounts list before =="
 curl -s -m 10 -b "$JAR" "$BASE/api/accounts" -o "$TMP/p3.json"
 [ "$(jget "$TMP/p3.json" "['accounts']")" = "[]" ] \
   && pass "accounts list starts empty" || note "accounts before: $(cat "$TMP/p3.json")"
 
+if [ "$ACCOUNT_PRESENT" = "0" ]; then
 echo "== PKCE start =="
 curl -s -m 30 -b "$JAR" -X POST "$BASE/api/auth/start" \
   -H 'Content-Type: application/json' -d '{"flow":"pkce"}' \
@@ -146,6 +164,7 @@ if [ -n "$CALLBACK_URL" ]; then
     gh_api "/issues/comments/$COMMENT_ID" -X DELETE >/dev/null 2>&1 || true
   fi
 fi
+fi # ACCOUNT_PRESENT = 0 (the PKCE login round trip)
 
 echo "== accounts list after =="
 curl -s -m 10 -b "$JAR" "$BASE/api/accounts" -o "$TMP/p6.json"
