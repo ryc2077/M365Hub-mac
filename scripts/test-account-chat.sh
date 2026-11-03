@@ -120,7 +120,7 @@ echo "== 10. chat with zero accounts fails cleanly =="
 # Zero accounts -> ErrNoAccount -> 502 "accounts: no healthy account available".
 curl -s -m 30 -b "$JAR" -X POST "$BASE/api/chat" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"gpt-6.1-sol-reasoning","messages":[{"role":"user","content":"你好"}],"attachments":[]}' \
+  -d '{"model":"gpt-5.6-reasoning","messages":[{"role":"user","content":"你好"}],"attachments":[]}' \
   -o "$TMP/r10.json" -w "%{http_code}" > "$TMP/r10.code"
 expect_code "POST /api/chat (no accounts)" 502 "$(cat "$TMP/r10.code")"
 if [ "$(jget "$TMP/r10.json" "['error']['type']")" = "upstream_error" ] \

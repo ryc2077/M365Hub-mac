@@ -185,7 +185,7 @@ curl -s -m 10 -b "$JAR" "$BASE/api/auth/status" -o "$TMP/p7.json"
 echo "== real chat with the account =="
 curl -s -m 180 -b "$JAR" -X POST "$BASE/api/chat" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"gpt-6.1-sol-reasoning","messages":[{"role":"user","content":"你好，请用一句话介绍你自己"}],"attachments":[]}' \
+  -d '{"model":"gpt-5.6-reasoning","messages":[{"role":"user","content":"你好，请用一句话介绍你自己"}],"attachments":[]}' \
   -o "$TMP/p8.json" -w "%{http_code}" > "$TMP/p8.code"
 [ "$(cat "$TMP/p8.code")" = "200" ] && pass "chat returned http 200" || fail "chat http $(cat "$TMP/p8.code"): $(cat "$TMP/p8.json" | head -c 500)"
 CONTENT="$(jget "$TMP/p8.json" "['content']")"

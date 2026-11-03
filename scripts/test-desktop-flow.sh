@@ -1,18 +1,18 @@
 #!/bin/bash
 # Desktop-flow test: does the reasoning model the desktop app uses
-# (gpt-6.1-sol-reasoning) actually call tools through this gateway?
+# (gpt-5.6-reasoning) actually call tools through this gateway?
 #
 # Background: the command-line CodeX (model gpt-4-auto) calls tools fine
 # in CI, but the user's desktop CodeX (default model
-# gpt-6.1-sol-reasoning, same gateway on their Mac) only talks about a
+# gpt-5.6-reasoning, same gateway on their Mac) only talks about a
 # plan and never acts. Two variables differ at once -- the client
 # (desktop app vs CLI) and the model (reasoning vs auto) -- so this
 # script tests the model on its own, through the same gateway, on both
 # API shapes a desktop client could use:
 #   P1 control: /v1/responses, gpt-4-auto, tools         (known good)
-#   P2: /v1/responses stream, gpt-6.1-sol-reasoning, tools
-#   P4: /v1/chat/completions stream, gpt-6.1-sol-reasoning, tools
-#   P5: CLI (codex exec) with model gpt-6.1-sol-reasoning, one file write
+#   P2: /v1/responses stream, gpt-5.6-reasoning, tools
+#   P4: /v1/chat/completions stream, gpt-5.6-reasoning, tools
+#   P5: CLI (codex exec) with model gpt-5.6-reasoning, one file write
 #   P7: the response.completed event itself must carry the function_call
 #       (the old stream sent an empty output array there, and the old
 #       chat-completions stream dropped tool_calls from its chunk, so a
@@ -103,18 +103,18 @@ else
   fail "P1: gpt-4-auto returned NO function_call in ${ELAPSED}s: $(head -c 300 "$TMP/desktop-p1.json")"
 fi
 
-# P2: /v1/responses stream, gpt-6.1-sol-reasoning (the desktop's model).
-echo "== P2: /v1/responses stream, gpt-6.1-sol-reasoning, tools =="
-P2_JSON=$("$PY" -c "import json,sys; print(json.dumps({'model':'gpt-6.1-sol-reasoning','input':sys.argv[1],'tools':json.loads(sys.argv[2]),'stream':True}))" "$PROMPT" "$TOOLS_JSON")
+# P2: /v1/responses stream, gpt-5.6-reasoning (the desktop's model).
+echo "== P2: /v1/responses stream, gpt-5.6-reasoning, tools =="
+P2_JSON=$("$PY" -c "import json,sys; print(json.dumps({'model':'gpt-5.6-reasoning','input':sys.argv[1],'tools':json.loads(sys.argv[2]),'stream':True}))" "$PROMPT" "$TOOLS_JSON")
 START=$(date +%s)
 curl -s -m 420 -N -X POST "$BASE/v1/responses" -H "Authorization: Bearer $API_KEY" \
   -H 'Content-Type: application/json' -d "$P2_JSON" -o "$TMP/desktop-p2.log" -w "%{http_code}" > "$TMP/desktop-p2.code"
 ELAPSED=$(( $(date +%s) - START ))
 echo "P2: http $(cat "$TMP/desktop-p2.code") in ${ELAPSED}s" | tee -a "$SUMMARY"
 if grep -q "function_call" "$TMP/desktop-p2.log" 2>/dev/null; then
-  pass "P2: gpt-6.1-sol-reasoning returned a function_call (stream) in ${ELAPSED}s"
+  pass "P2: gpt-5.6-reasoning returned a function_call (stream) in ${ELAPSED}s"
 else
-  fail "P2: gpt-6.1-sol-reasoning returned NO function_call (stream) in ${ELAPSED}s"
+  fail "P2: gpt-5.6-reasoning returned NO function_call (stream) in ${ELAPSED}s"
   tail -c 500 "$TMP/desktop-p2.log" | tee -a "$SUMMARY"
 fi
 grep -q "response.completed" "$TMP/desktop-p2.log" 2>/dev/null \
@@ -146,9 +146,9 @@ print("yes" if found else "no")
 # P8: no tools at all (the exact shape the desktop app sends). The gateway
 # must inject the default CodeX tools (shell/read/apply_patch) so the model
 # still emits a function call instead of falling back to its own container.
-echo "== P8: /v1/responses, gpt-6.1-sol-reasoning, NO tools (desktop shape) =="
+echo "== P8: /v1/responses, gpt-5.6-reasoning, NO tools (desktop shape) =="
 P8_PROMPT="Run the shell command uname -s on this machine and report exactly what it printed. Use the shell tool to run it; do not just guess the answer."
-P8_JSON=$("$PY" -c "import json,sys; print(json.dumps({'model':'gpt-6.1-sol-reasoning','input':sys.argv[1],'stream':False}))" "$P8_PROMPT")
+P8_JSON=$("$PY" -c "import json,sys; print(json.dumps({'model':'gpt-5.6-reasoning','input':sys.argv[1],'stream':False}))" "$P8_PROMPT")
 START=$(date +%s)
 curl -s -m 420 -X POST "$BASE/v1/responses" -H "Authorization: Bearer $API_KEY" \
   -H 'Content-Type: application/json' -d "$P8_JSON" -o "$TMP/desktop-p8.json" -w "%{http_code}" > "$TMP/desktop-p8.code"
@@ -166,19 +166,19 @@ print("yes" if "shell" in names else "no")
   && pass "P8: no-tools request still returned a shell function_call in ${ELAPSED}s (default tools injected)" \
   || fail "P8: no-tools request returned NO shell function_call in ${ELAPSED}s: $(head -c 400 "$TMP/desktop-p8.json")"
 
-# P4: /v1/chat/completions stream, gpt-6.1-sol-reasoning (the other shape
+# P4: /v1/chat/completions stream, gpt-5.6-reasoning (the other shape
 # a desktop client could use).
-echo "== P4: /v1/chat/completions stream, gpt-6.1-sol-reasoning, tools =="
-P4_JSON=$("$PY" -c "import json,sys; print(json.dumps({'model':'gpt-6.1-sol-reasoning','messages':[{'role':'user','content':sys.argv[1]}],'tools':json.loads(sys.argv[2]),'stream':True}))" "$PROMPT" "$TOOLS_JSON")
+echo "== P4: /v1/chat/completions stream, gpt-5.6-reasoning, tools =="
+P4_JSON=$("$PY" -c "import json,sys; print(json.dumps({'model':'gpt-5.6-reasoning','messages':[{'role':'user','content':sys.argv[1]}],'tools':json.loads(sys.argv[2]),'stream':True}))" "$PROMPT" "$TOOLS_JSON")
 START=$(date +%s)
 curl -s -m 420 -N -X POST "$BASE/v1/chat/completions" -H "Authorization: Bearer $API_KEY" \
   -H 'Content-Type: application/json' -d "$P4_JSON" -o "$TMP/desktop-p4.log" -w "%{http_code}" > "$TMP/desktop-p4.code"
 ELAPSED=$(( $(date +%s) - START ))
 echo "P4: http $(cat "$TMP/desktop-p4.code") in ${ELAPSED}s" | tee -a "$SUMMARY"
 if grep -q "tool_calls" "$TMP/desktop-p4.log" 2>/dev/null; then
-  pass "P4: gpt-6.1-sol-reasoning returned tool_calls (chat completions stream) in ${ELAPSED}s"
+  pass "P4: gpt-5.6-reasoning returned tool_calls (chat completions stream) in ${ELAPSED}s"
 else
-  fail "P4: gpt-6.1-sol-reasoning returned NO tool_calls (chat completions stream) in ${ELAPSED}s"
+  fail "P4: gpt-5.6-reasoning returned NO tool_calls (chat completions stream) in ${ELAPSED}s"
   tail -c 500 "$TMP/desktop-p4.log" | tee -a "$SUMMARY"
 fi
 grep -q "\[DONE\]" "$TMP/desktop-p4.log" 2>/dev/null \
@@ -187,7 +187,7 @@ grep -q "\[DONE\]" "$TMP/desktop-p4.log" 2>/dev/null \
 
 # P5: the CLI with the reasoning model. Same client as the proven
 # gpt-4-auto run, only the model changes, so this isolates the model.
-echo "== P5: CLI (codex exec) with model gpt-6.1-sol-reasoning =="
+echo "== P5: CLI (codex exec) with model gpt-5.6-reasoning =="
 if ! command -v codex >/dev/null 2>&1; then
   npm install -g @openai/codex >"$TMP/desktop-npm.log" 2>&1 \
     && pass "npm install -g @openai/codex" || fail "npm install failed"
@@ -197,7 +197,7 @@ CODEX_VER="$(codex --version 2>&1 | head -n 1)"
 mkdir -p "$HOME/.codex"
 cat > "$HOME/.codex/config.toml" <<'EOF'
 model_provider = "m365hub"
-model = "gpt-6.1-sol-reasoning"
+model = "gpt-5.6-reasoning"
 [model_providers.m365hub]
 name = "m365hub"
 base_url = "http://127.0.0.1:8230/v1"
@@ -221,9 +221,9 @@ P5_RC=$?
 ELAPSED=$(( $(date +%s) - START ))
 echo "P5: codex exit $P5_RC in ${ELAPSED}s" | tee -a "$SUMMARY"
 if [ -f "$P5_DIR/reasoning-model.txt" ] && [ "$(cat "$P5_DIR/reasoning-model.txt")" = "reasoning-model-ok" ]; then
-  pass "P5: CLI with gpt-6.1-sol-reasoning created the file in ${ELAPSED}s"
+  pass "P5: CLI with gpt-5.6-reasoning created the file in ${ELAPSED}s"
 else
-  fail "P5: CLI with gpt-6.1-sol-reasoning did NOT create the file in ${ELAPSED}s"
+  fail "P5: CLI with gpt-5.6-reasoning did NOT create the file in ${ELAPSED}s"
   tail -n 20 "$TMP/desktop-p5.log" | tee -a "$SUMMARY"
 fi
 

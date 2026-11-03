@@ -161,8 +161,7 @@ struct ChatView: View {
             models = ids
             let saved = UserDefaults.standard.string(forKey: "m365hub-chat-model")
             if let saved = saved, ids.contains(saved) { model = saved }
-            else if ids.contains("gpt-6.1-sol-reasoning") { model = "gpt-6.1-sol-reasoning" }
-            else if ids.contains("gpt-6.1-sol") { model = "gpt-6.1-sol" }
+            else if ids.contains("gpt-5.6-reasoning") { model = "gpt-5.6-reasoning" }
             else if ids.contains("gpt-4-auto") { model = "gpt-4-auto" }
             else if let first = ids.first { model = first }
         }
