@@ -221,7 +221,7 @@ else
 fi
 
 echo "== round 4: apply_patch create =="
-run_timeout 300 codex exec $APPROVE $SKIP $JSON "Use the file editing tool (apply_patch) to create a new file named patch-created.txt in the current directory with exactly these two lines: first-patch-line and second-patch-line. Do not use shell commands to create the file." < /dev/null > "$TMP/codex4.log" 2>&1
+run_timeout 300 codex exec $APPROVE $SKIP $JSON "Create a new file named patch-created.txt in the current directory with exactly these two lines: first-patch-line and second-patch-line. Prefer the file editing tool (apply_patch) if it is available; otherwise use shell commands." < /dev/null > "$TMP/codex4.log" 2>&1
 T4_TOOLS="$(tools_used "$TMP/codex4.log")"
 [ -n "$T4_TOOLS" ] && note "round 4 tools used: $T4_TOOLS"
 if grep -q "first-patch-line" "$TOOLS_DIR/patch-created.txt" 2>/dev/null && grep -q "second-patch-line" "$TOOLS_DIR/patch-created.txt" 2>/dev/null; then
@@ -234,7 +234,7 @@ else
 fi
 
 echo "== round 5: apply_patch edit =="
-run_timeout 300 codex exec $APPROVE $SKIP $JSON "Use the file editing tool (apply_patch) to change the second line of patch-created.txt to second-patch-line-edited. Do not use shell commands to edit the file." < /dev/null > "$TMP/codex5.log" 2>&1
+run_timeout 300 codex exec $APPROVE $SKIP $JSON "Change the second line of patch-created.txt to second-patch-line-edited. Prefer the file editing tool (apply_patch) if it is available; otherwise use shell commands." < /dev/null > "$TMP/codex5.log" 2>&1
 T5_TOOLS="$(tools_used "$TMP/codex5.log")"
 [ -n "$T5_TOOLS" ] && note "round 5 tools used: $T5_TOOLS"
 if grep -q "second-patch-line-edited" "$TOOLS_DIR/patch-created.txt" 2>/dev/null; then
@@ -261,7 +261,7 @@ else
 fi
 
 echo "== round 7: apply_patch delete =="
-run_timeout 300 codex exec $APPROVE $SKIP $JSON "Use the file editing tool (apply_patch) to delete the file shell-os.txt in the current directory." < /dev/null > "$TMP/codex7.log" 2>&1
+run_timeout 300 codex exec $APPROVE $SKIP $JSON "Delete the file shell-os.txt in the current directory. Prefer the file editing tool (apply_patch) if it is available; otherwise use shell commands." < /dev/null > "$TMP/codex7.log" 2>&1
 T7_TOOLS="$(tools_used "$TMP/codex7.log")"
 [ -n "$T7_TOOLS" ] && note "round 7 tools used: $T7_TOOLS"
 if [ ! -f "$TOOLS_DIR/shell-os.txt" ]; then
