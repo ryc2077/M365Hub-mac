@@ -10,13 +10,19 @@ struct M365HubApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if gateway.ready {
-                ContentView(store: store)
-                    .preferredColorScheme(dark ? .dark : .light)
-            } else {
-                VStack { ProgressView(); Text("正在启动本地网关…") }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Group {
+                if gateway.ready {
+                    ContentView(store: store)
+                        .preferredColorScheme(dark ? .dark : .light)
+                } else {
+                    VStack { ProgressView(); Text("正在启动本地网关…") }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
+            // Startup lives here, not in ContentView.onAppear: ContentView
+            // only exists once gateway.ready is true, so starting there
+            // deadlocked on the spinner forever (1.0.12, proven in CI).
+            .onAppear { gateway.start() }
         }
         .commands {
             CommandGroup(replacing: .newItem) {
@@ -60,55 +66,7 @@ struct ContentView: View {
     var body: some View {
         Group {
             if loggedIn == true {
-                NavigationSplitView(columnVisibility: $columnVisibility) {
-                    List(selection: $section) {
-                        Section("历史对话") {
-                            Button("＋ 新对话") { _ = store.newConversation(); section = .chat }
-                            ForEach(store.conversations) { c in
-                                HStack {
-                                    Text(c.title).lineLimit(1)
-                                    Spacer()
-                                    Button("×") { store.delete(c.id) }
-                                        .buttonStyle(.plain)
-                                }
-                                .tag(Section.chat)
-                                .onTapGesture {
-                                    store.currentID = c.id
-                                    section = .chat
-                                }
-                            }
-                        }
-                        Section("功能") {
-                            ForEach(Section.allCases.filter { $0 != .chat }) { s in
-                                Text(s.rawValue).tag(s)
-                            }
-                        }
-                    }
-                    .navigationSplitViewColumnWidth(min: 220, ideal: 260)
-                } detail: {
-                    switch section {
-                    case .chat: ChatView(store: store)
-                    case .dashboard: DashboardView()
-                    case .accounts: AccountsView()
-                    case .keys: KeysView()
-                    case .proxies: ProxiesView()
-                    case .usage: UsageView()
-                    case .models: ModelsView()
-                    case .memory: MemoryView()
-                    case .system: SystemView()
-                    case .settings: SettingsView(onLogout: { loggedIn = false })
-                    }
-                }
-                .toolbar {
-                    ToolbarItem(placement: .navigation) {
-                        Button(action: {
-                            columnVisibility = columnVisibility == .all ? .detailOnly : .all
-                        }) {
-                            Image(systemName: "sidebar.left")
-                        }
-                        .help("历史对话")
-                    }
-                }
+                mainView
             } else {
                 LoginView(mustChange: $mustChange, password: $password, error: $error) {
                     API.login(password: password) { r in
@@ -124,10 +82,77 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            GatewayManager.shared.start()
+            // Gateway startup is driven by the App's WindowGroup onAppear:
+            // this view only exists once the gateway is ready, so calling
+            // start() here deadlocked on the spinner (see 1.0.12).
             API.session { loggedIn = $0 }
         }
         .frame(minWidth: 900, minHeight: 600)
+    }
+
+    // Split from body: one giant Group with the split view, the history
+    // list and the nine-way detail switch made the type checker time out
+    // ("unable to type-check this expression in reasonable time").
+    // Each piece below type-checks on its own.
+    private var mainView: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebar
+        } detail: {
+            detailView
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button(action: {
+                    columnVisibility = columnVisibility == .all ? .detailOnly : .all
+                }) {
+                    Image(systemName: "sidebar.left")
+                }
+                .help("历史对话")
+            }
+        }
+    }
+
+    private var sidebar: some View {
+        List(selection: $section) {
+            SwiftUI.Section("历史对话") {
+                Button("＋ 新对话") { _ = store.newConversation(); section = .chat }
+                ForEach(store.conversations) { c in
+                    HStack {
+                        Text(c.title).lineLimit(1)
+                        Spacer()
+                        Button("×") { store.delete(c.id) }
+                            .buttonStyle(.plain)
+                    }
+                    .tag(Section.chat)
+                    .onTapGesture {
+                        store.currentID = c.id
+                        section = .chat
+                    }
+                }
+            }
+            SwiftUI.Section("功能") {
+                ForEach(Section.allCases.filter { $0 != .chat }) { s in
+                    Text(s.rawValue).tag(s)
+                }
+            }
+        }
+        .navigationSplitViewColumnWidth(min: 220, ideal: 260)
+    }
+
+    @ViewBuilder
+    private var detailView: some View {
+        switch section {
+        case .chat: ChatView(store: store)
+        case .dashboard: DashboardView()
+        case .accounts: AccountsView()
+        case .keys: KeysView()
+        case .proxies: ProxiesView()
+        case .usage: UsageView()
+        case .models: ModelsView()
+        case .memory: MemoryView()
+        case .system: SystemView()
+        case .settings: SettingsView(onLogout: { loggedIn = false })
+        }
     }
 }
 

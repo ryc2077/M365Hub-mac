@@ -9,6 +9,7 @@ enum API {
 
     static func request(_ path: String, method: String = "GET",
                         body: [String: Any]? = nil,
+                        timeout: TimeInterval = 120,
                         completion: @escaping (Result<[String: Any], Error>) -> Void) {
         // Build the URL so a query string in `path` (e.g.
         // "/api/usage?days=7") stays a query. appendingPathComponent
@@ -27,7 +28,7 @@ enum API {
         }
         var req = URLRequest(url: url)
         req.httpMethod = method
-        req.timeoutInterval = 120
+        req.timeoutInterval = timeout
         if let body = body {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try? JSONSerialization.data(withJSONObject: body)
@@ -42,7 +43,13 @@ enum API {
                     json = obj
                 }
                 if code >= 400 {
-                    let msg = (json["message"] as? String) ?? (json["error"] as? String) ?? "HTTP \(code)"
+                    // writeErr nests the error: {"error":{"message":...}}.
+                    // Without the nested lookup the chat only ever showed
+                    // a bare "HTTP 502" instead of the real reason.
+                    let msg = (json["message"] as? String)
+                        ?? (json["error"] as? [String: Any])?["message"] as? String
+                        ?? (json["error"] as? String)
+                        ?? "HTTP \(code)"
                     completion(.failure(NSError(domain: "m365hub", code: code,
                                                 userInfo: [NSLocalizedDescriptionKey: msg])))
                 } else {
@@ -52,8 +59,8 @@ enum API {
         }.resume()
     }
 
-    static func session(completion: @escaping (Bool) -> Void) {
-        request("/api/admin/session") { r in
+    static func session(timeout: TimeInterval = 120, completion: @escaping (Bool) -> Void) {
+        request("/api/admin/session", timeout: timeout) { r in
             if case .success(let d) = r { completion(d["loggedIn"] as? Bool ?? false) }
             else { completion(false) }
         }
