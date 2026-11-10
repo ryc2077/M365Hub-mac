@@ -27,10 +27,14 @@ guard let cookie = HTTPCookie(properties: props) else {
     fputs("failed to create cookie\n", stderr)
     exit(1)
 }
+print("created cookie: name=\(cookie.name) domain=\(cookie.domain) path=\(cookie.path) expires=\(String(describing: cookie.expiresDate)) isSessionOnly=\(cookie.isSessionOnly)")
 HTTPCookieStorage.shared.setCookie(cookie)
 // Give the shared store a moment to persist before the app reads it.
 Thread.sleep(forTimeInterval: 1)
+let all = HTTPCookieStorage.shared.cookies ?? []
+print("all cookies in shared store: \(all.map { "\($0.name)@\($0.domain)\($0.path)" })")
 let stored = HTTPCookieStorage.shared.cookies(for: URL(string: "http://127.0.0.1:8230")!) ?? []
+print("cookies for http://127.0.0.1:8230: \(stored.map { $0.name })")
 if stored.contains(where: { $0.name == "m365hub_admin" }) {
     print("cookie seeded: m365hub_admin present for 127.0.0.1")
 } else {
