@@ -98,17 +98,19 @@ osascript <<OSA 2>&1 | tee -a "$SUMMARY" || echo "UI automation failed (best eff
 tell application "M365Hub" to activate
 delay 2
 tell application "System Events"
+  -- click at is a System Events-level mouse click: it must NOT sit
+  -- inside "tell process", where it silently does nothing.
+  set winPos to position of window 1 of process "M365Hub"
+  set winSize to size of window 1 of process "M365Hub"
+  set cx to (item 1 of winPos) + (item 1 of winSize) / 2
+  set cy to (item 2 of winPos) + (item 2 of winSize) * 0.51
+  click at {cx, cy}
+  delay 1
+  keystroke "$NEW_PASS"
+  delay 1
+  keystroke return
+  delay 4
   tell process "M365Hub"
-    set winPos to position of window 1
-    set winSize to size of window 1
-    set cx to (item 1 of winPos) + (item 1 of winSize) / 2
-    set cy to (item 2 of winPos) + (item 2 of winSize) * 0.51
-    click at {cx, cy}
-    delay 1
-    keystroke "$NEW_PASS"
-    delay 1
-    keystroke return
-    delay 4
     -- Sidebar: the 本地记忆 row.
     try
       click static text "本地记忆" of window 1
