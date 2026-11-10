@@ -96,19 +96,26 @@ echo "== 3. open the memory view in the app and screenshot =="
 # both left the app sitting on the login screen.)
 osascript <<OSA 2>&1 | tee -a "$SUMMARY" || echo "UI automation failed (best effort)"
 tell application "M365Hub" to activate
-delay 2
+delay 3
 tell application "System Events"
-  -- click at is a System Events-level mouse click: it must NOT sit
-  -- inside "tell process", where it silently does nothing.
+  set frontmost of process "M365Hub" to true
+  delay 1
   set winPos to position of window 1 of process "M365Hub"
   set winSize to size of window 1 of process "M365Hub"
+  -- Password field: ~50% width / 51% height of the window.
   set cx to (item 1 of winPos) + (item 1 of winSize) / 2
   set cy to (item 2 of winPos) + (item 2 of winSize) * 0.51
   click at {cx, cy}
   delay 1
+  -- Tab as well, so focus is in the field even if the click missed.
+  keystroke tab
+  delay 1
   keystroke "$NEW_PASS"
   delay 1
-  keystroke return
+  -- Click 登录 by coordinates too (~50% width / 57% height) instead
+  -- of relying on Return submitting the SecureField.
+  set by to (item 2 of winPos) + (item 2 of winSize) * 0.57
+  click at {cx, by}
   delay 4
   tell process "M365Hub"
     -- Sidebar: the 本地记忆 row.
