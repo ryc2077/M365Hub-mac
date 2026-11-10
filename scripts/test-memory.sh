@@ -119,6 +119,7 @@ PY
 [ $? -ne 0 ] && fail "detail content mismatch (see above)"
 
 echo "== 3. launch the app (adopts the gateway, skips login) and open 本地记忆 =="
+sleep 5
 open "$APP" || echo "open failed (exit $?)"
 sleep 5
 osascript <<OSA 2>&1 | tee -a "$SUMMARY" || echo "sidebar navigation failed (best effort)"

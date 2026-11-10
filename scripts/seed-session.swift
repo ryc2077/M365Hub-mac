@@ -29,8 +29,17 @@ guard let cookie = HTTPCookie(properties: props) else {
 }
 print("created cookie: name=\(cookie.name) domain=\(cookie.domain) path=\(cookie.path) expires=\(String(describing: cookie.expiresDate)) isSessionOnly=\(cookie.isSessionOnly)")
 HTTPCookieStorage.shared.setCookie(cookie)
-// Give the shared store a moment to persist before the app reads it.
-Thread.sleep(forTimeInterval: 1)
+// The shared store syncs to disk asynchronously; the app (a separate
+// process) only sees the cookie once it has landed there. Force the
+// issue by making a real request with this session (which attaches the
+// cookie) and then waiting, so the store has time to flush.
+let semaphore = DispatchSemaphore(value: 0)
+let task = URLSession.shared.dataTask(with: URL(string: "http://127.0.0.1:8230/api/admin/session")!) { _, _, _ in
+    semaphore.signal()
+}
+task.resume()
+_ = semaphore.wait(timeout: .now() + 10)
+Thread.sleep(forTimeInterval: 5)
 let all = HTTPCookieStorage.shared.cookies ?? []
 print("all cookies in shared store: \(all.map { "\($0.name)@\($0.domain)\($0.path)" })")
 if all.contains(where: { $0.name == "m365hub_admin" && $0.domain == "127.0.0.1" }) {
