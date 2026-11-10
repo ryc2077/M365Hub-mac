@@ -71,9 +71,16 @@ PY
 )
 if [ -n "$COOKIE_VALUE" ]; then
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-  swift "$SCRIPT_DIR/seed-session.swift" "$COOKIE_VALUE" 2>&1 | tee -a "$SUMMARY" \
-    && pass "session cookie seeded into shared storage" \
-    || fail "seed-session.swift failed"
+  # Do not pipe swift through tee here: the pipeline's exit code would
+  # be tee's (0), hiding a seed failure. Capture the output to a file.
+  swift "$SCRIPT_DIR/seed-session.swift" "$COOKIE_VALUE" > "$TMP/seed-session.out" 2>&1
+  SEED_RC=$?
+  cat "$TMP/seed-session.out" | tee -a "$SUMMARY"
+  if [ "$SEED_RC" = "0" ]; then
+    pass "session cookie seeded into shared storage"
+  else
+    fail "seed-session.swift failed (exit $SEED_RC)"
+  fi
 else
   fail "no m365hub_admin cookie in jar"
 fi

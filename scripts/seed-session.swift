@@ -19,6 +19,9 @@ let props: [HTTPCookiePropertyKey: Any] = [
     .domain: "127.0.0.1",
     .path: "/",
     .secure: false,
+    // Persistent (not session-only): a cookie without an expiry was not
+    // returned by cookies(for:) in this context.
+    .expires: Date(timeIntervalSinceNow: 12 * 3600),
 ]
 guard let cookie = HTTPCookie(properties: props) else {
     fputs("failed to create cookie\n", stderr)
