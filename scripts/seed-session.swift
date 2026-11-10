@@ -33,9 +33,7 @@ HTTPCookieStorage.shared.setCookie(cookie)
 Thread.sleep(forTimeInterval: 1)
 let all = HTTPCookieStorage.shared.cookies ?? []
 print("all cookies in shared store: \(all.map { "\($0.name)@\($0.domain)\($0.path)" })")
-let stored = HTTPCookieStorage.shared.cookies(for: URL(string: "http://127.0.0.1:8230")!) ?? []
-print("cookies for http://127.0.0.1:8230: \(stored.map { $0.name })")
-if stored.contains(where: { $0.name == "m365hub_admin" }) {
+if all.contains(where: { $0.name == "m365hub_admin" && $0.domain == "127.0.0.1" }) {
     print("cookie seeded: m365hub_admin present for 127.0.0.1")
 } else {
     fputs("cookie NOT stored\n", stderr)
