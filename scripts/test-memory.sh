@@ -87,27 +87,27 @@ PY
 [ $? -ne 0 ] && fail "detail content mismatch (see above)"
 
 echo "== 3. open the memory view in the app and screenshot =="
-# The login screen's SecureField does not take keyboard focus on its
-# own: keystrokes sent to the app go nowhere until the field is
-# clicked. So click the field first, then type, then click 登录.
-# (The first version of this step typed without clicking and the
-# screenshot showed the app still sitting on the login screen.)
+# Log the app in through its own login screen, then open 本地记忆.
+# Accessibility references (text field 1 / button "登录") do not
+# resolve for this SwiftUI login form, so click the password field by
+# window-relative coordinates instead: the login form is centered, so
+# the field sits at about 50% width / 51% height of the window.
+# (Two earlier attempts — bare keystrokes, then click text field 1 —
+# both left the app sitting on the login screen.)
 osascript <<OSA 2>&1 | tee -a "$SUMMARY" || echo "UI automation failed (best effort)"
 tell application "M365Hub" to activate
 delay 2
 tell application "System Events"
   tell process "M365Hub"
-    try
-      click text field 1 of window 1
-    end try
+    set winPos to position of window 1
+    set winSize to size of window 1
+    set cx to (item 1 of winPos) + (item 1 of winSize) / 2
+    set cy to (item 2 of winPos) + (item 2 of winSize) * 0.51
+    click at {cx, cy}
     delay 1
     keystroke "$NEW_PASS"
     delay 1
-    try
-      click button "登录" of window 1
-    on error
-      keystroke return
-    end try
+    keystroke return
     delay 4
     -- Sidebar: the 本地记忆 row.
     try
