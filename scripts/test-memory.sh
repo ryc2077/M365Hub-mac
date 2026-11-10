@@ -99,10 +99,6 @@ tell application "System Events"
   tell process "M365Hub"
     try
       click text field 1 of window 1
-    on error
-      try
-        click secure text field 1 of window 1
-      end try
     end try
     delay 1
     keystroke "$NEW_PASS"
