@@ -312,6 +312,106 @@ struct ModelsView: View {
     }
 }
 
+struct MemoryView: View {
+    @State private var memories: [[String: Any]] = []
+    @State private var selectedKey = ""
+    @State private var detail = ""
+    @State private var loadingDetail = false
+    @State private var error = ""
+    @State private var notice = ""
+
+    var body: some View {
+        SectionPage(title: "本地记忆", subtitle: "网关本地项目记忆（按标签与会话分开存储），点一条看具体内容") {
+            Button("刷新") { load() }
+            if memories.isEmpty && error.isEmpty {
+                Text("还没有本地记忆").foregroundStyle(.secondary)
+            }
+            ForEach(memories.indices, id: \.self) { i in
+                let m = memories[i]
+                let key = m["key"] as? String ?? ""
+                HStack {
+                    Button {
+                        show(key)
+                    } label: {
+                        Text("\(key) · \(m["turns"] as? Int ?? 0) 轮 · \(m["chars"] as? Int ?? 0) 字 · \((m["hasSummary"] as? Bool ?? false) ? "已压缩" : "未压缩")")
+                    }
+                    .buttonStyle(.plain)
+                    Spacer()
+                    Button("删除") {
+                        API.request("/api/local-memory?key=\(encoded(key))", method: "DELETE") { r in
+                            switch r {
+                            case .success:
+                                notice = "已删除 \(key)"
+                                if selectedKey == key { selectedKey = ""; detail = "" }
+                                load()
+                            case .failure(let e):
+                                error = e.localizedDescription
+                            }
+                        }
+                    }
+                }
+            }
+            if !selectedKey.isEmpty {
+                Text("记忆：\(selectedKey)").font(.title2)
+                if loadingDetail {
+                    Text("正在读取…").foregroundStyle(.secondary)
+                } else if detail.isEmpty {
+                    Text("这条记忆没有内容").foregroundStyle(.secondary)
+                } else {
+                    Text(detail)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            if !notice.isEmpty { Text(notice).foregroundStyle(.secondary) }
+            if !error.isEmpty { Text(error).foregroundStyle(.red) }
+        }
+        .onAppear { load() }
+    }
+
+    private func encoded(_ s: String) -> String {
+        s.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? s
+    }
+
+    private func load() {
+        error = ""; notice = ""
+        API.request("/api/local-memory") { r in
+            if case .success(let d) = r {
+                memories = d["memories"] as? [[String: Any]] ?? []
+            } else if case .failure(let e) = r {
+                error = e.localizedDescription
+            }
+        }
+    }
+
+    private func show(_ key: String) {
+        selectedKey = key
+        detail = ""
+        loadingDetail = true
+        error = ""
+        API.request("/api/local-memory?key=\(encoded(key))") { r in
+            loadingDetail = false
+            switch r {
+            case .success(let d):
+                var parts: [String] = []
+                if let summary = d["summary"] as? String, !summary.isEmpty {
+                    parts.append("[摘要]\n\(summary)")
+                }
+                if let turns = d["turns"] as? [[String: Any]] {
+                    for t in turns {
+                        let role = t["role"] as? String ?? ""
+                        let content = t["content"] as? String ?? ""
+                        parts.append("[\(role)] \(content)")
+                    }
+                }
+                detail = parts.joined(separator: "\n\n")
+            case .failure(let e):
+                error = e.localizedDescription
+            }
+        }
+    }
+}
+
 struct SystemView: View {
     @State private var line = "正在读取…"
     var body: some View {

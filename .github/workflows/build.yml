@@ -62,6 +62,16 @@ jobs:
       - name: Account add and chat test
         run: bash scripts/test-account-chat.sh build/Build/Products/Debug/M365Hub.app
 
+      # Memory test: seeds one local memory, proves the gateway list /
+      # detail / delete API returns its real content (summary + turns),
+      # then opens the Mac 本地记忆 section for a screenshot. Runs here
+      # because the account test above already changed the admin password
+      # to ci-test-pass-20261101, which the UI login in this test types.
+      # The seeded memory is deleted by the test, so nothing leaks into
+      # the account cache saved later.
+      - name: Memory test
+        run: bash scripts/test-memory.sh build/Build/Products/Debug/M365Hub.app
+
       # Restore the gateway data dir (~/.config/m365hub: accounts +
       # tokens) from the previous run, so the real account survives
       # between runs and the PKCE login round trip is only needed once,
@@ -158,6 +168,8 @@ jobs:
           cp "${RUNNER_TEMP}/m365hub-app-shot-late.png" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-account-chat-shot.png" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-account-chat-summary.txt" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-memory-shot.png" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-memory-summary.txt" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-real-account-shot.png" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-real-account-summary.txt" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-real-account-pkce-shot.png" test-evidence/ 2>/dev/null || true
