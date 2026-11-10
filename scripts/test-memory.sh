@@ -87,20 +87,33 @@ PY
 [ $? -ne 0 ] && fail "detail content mismatch (see above)"
 
 echo "== 3. open the memory view in the app and screenshot =="
+# The login screen's SecureField does not take keyboard focus on its
+# own: keystrokes sent to the app go nowhere until the field is
+# clicked. So click the field first, then type, then click 登录.
+# (The first version of this step typed without clicking and the
+# screenshot showed the app still sitting on the login screen.)
 osascript <<OSA 2>&1 | tee -a "$SUMMARY" || echo "UI automation failed (best effort)"
 tell application "M365Hub" to activate
 delay 2
 tell application "System Events"
   tell process "M365Hub"
-    -- Login screen: one SecureField + 登录 button; typing the
-    -- password and pressing Return submits it.
     try
-      keystroke "$NEW_PASS"
-      keystroke return
-      delay 3
+      click text field 1 of window 1
+    on error
+      try
+        click secure text field 1 of window 1
+      end try
     end try
-    -- Sidebar: the 本地记忆 row. Try the static text first, then
-    -- any row/button whose description matches.
+    delay 1
+    keystroke "$NEW_PASS"
+    delay 1
+    try
+      click button "登录" of window 1
+    on error
+      keystroke return
+    end try
+    delay 4
+    -- Sidebar: the 本地记忆 row.
     try
       click static text "本地记忆" of window 1
       delay 2
