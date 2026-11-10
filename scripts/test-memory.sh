@@ -1,19 +1,22 @@
 #!/bin/bash
 # Memory test: the Mac "本地记忆" view and the gateway memory API.
 # Seeds one memory (tag:ci-test) into the gateway data dir BEFORE the
-# app launches (the gateway loads local-memory.json at startup), then:
+# gateway starts (it loads local-memory.json at startup), then:
 #   - list shows the seeded memory (key / turns / chars / hasSummary)
 #   - detail returns its real summary + turns (not just a byte count)
 #   - delete removes it (also keeps the seed out of the account cache)
-# Then it logs the app in through its own login screen and opens the
-# 本地记忆 section for a screenshot. The API assertions are the hard
-# pass/fail; the UI navigation is best effort (screenshots are evidence).
-# Runs after test-account-chat.sh, which already changed the admin
-# password to ci-test-pass-20261101.
+# Then it screenshots the Mac 本地记忆 section. The app's login screen
+# cannot be driven in the runner's GUI session (synthetic keystrokes and
+# coordinate clicks never reach the field — five attempts proved it), so
+# the session cookie is seeded into the shared cookie storage instead
+# (scripts/seed-session.swift) and the app is launched after that, so it
+# opens straight into the main view. Runs after test-account-chat.sh,
+# which already changed the admin password to ci-test-pass-20261101.
 # Usage: scripts/test-memory.sh <path-to-M365Hub.app>
 # Exit 0 only if every API step matches its expected result.
 set -u
 APP="${1:?usage: test-memory.sh <M365Hub.app>}"
+BIN="$APP/Contents/Resources/m365hub"
 BASE="http://127.0.0.1:8230"
 TMP="${RUNNER_TEMP:-/tmp}"
 JAR="$TMP/m365hub-cookies.txt"
@@ -37,12 +40,16 @@ EOF
 grep -q "tag:ci-test" "$HOME/.config/m365hub/local-memory.json" \
   && pass "seed file written" || { fail "seed file missing"; }
 
-echo "== launch the app and wait for its gateway =="
-open "$APP" || echo "open failed (exit $?)"
+echo "== start the gateway directly (so the app can adopt it) =="
+[ -x "$BIN" ] || { fail "gateway binary missing/not executable: $BIN"; }
+M365_DATA_DIR="$HOME/.config/m365hub" M365_LISTEN="127.0.0.1:8230" \
+  "$BIN" serve > "$HOME/.config/m365hub/serve-mac.log" 2>&1 &
+GW_PID=$!
+echo "gateway pid: $GW_PID" | tee -a "$SUMMARY"
 UP=0
 for i in $(seq 1 30); do
-  CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 2 "$BASE/api/admin/session" || echo "000")
-  if [ "$CODE" = "200" ]; then UP=1; break; fi
+  CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 2 "$BASE/api/admin/session" 2>/dev/null || echo "000")
+  if [ "$CODE" != "000" ]; then UP=1; break; fi
   sleep 1
 done
 [ "$UP" = "1" ] && pass "gateway up (session answers)" || { fail "gateway never answered"; }
@@ -52,6 +59,24 @@ curl -s -m 10 -c "$JAR" -b "$JAR" -X POST "$BASE/api/admin/login" \
   -H 'Content-Type: application/json' -d "{\"password\":\"$NEW_PASS\"}" -o "$TMP/mr1.json" -w "%{http_code}" > "$TMP/mr1.code"
 [ "$(cat "$TMP/mr1.code")" = "200" ] \
   && pass "login with the changed password" || fail "login: $(cat "$TMP/mr1.json")"
+
+echo "== seed the session cookie so the app skips its login screen =="
+COOKIE_VALUE=$(python3 - "$JAR" <<'PY'
+import sys
+for line in open(sys.argv[1], errors="replace"):
+    parts = line.rstrip("\n").split("\t")
+    if len(parts) >= 7 and parts[5] == "m365hub_admin":
+        print(parts[6]); break
+PY
+)
+if [ -n "$COOKIE_VALUE" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+  swift "$SCRIPT_DIR/seed-session.swift" "$COOKIE_VALUE" 2>&1 | tee -a "$SUMMARY" \
+    && pass "session cookie seeded into shared storage" \
+    || fail "seed-session.swift failed"
+else
+  fail "no m365hub_admin cookie in jar"
+fi
 
 echo "== 1. list memories =="
 curl -s -m 10 -b "$JAR" "$BASE/api/local-memory" -o "$TMP/mr2.json" -w "%{http_code}" > "$TMP/mr2.code"
@@ -86,39 +111,14 @@ print("PASS: detail shows the real summary + both turns")
 PY
 [ $? -ne 0 ] && fail "detail content mismatch (see above)"
 
-echo "== 3. open the memory view in the app and screenshot =="
-# Log the app in through its own login screen, then open 本地记忆.
-# Accessibility references (text field 1 / button "登录") do not
-# resolve for this SwiftUI login form, so click the password field by
-# window-relative coordinates instead: the login form is centered, so
-# the field sits at about 50% width / 51% height of the window.
-# (Two earlier attempts — bare keystrokes, then click text field 1 —
-# both left the app sitting on the login screen.)
-osascript <<OSA 2>&1 | tee -a "$SUMMARY" || echo "UI automation failed (best effort)"
+echo "== 3. launch the app (adopts the gateway, skips login) and open 本地记忆 =="
+open "$APP" || echo "open failed (exit $?)"
+sleep 5
+osascript <<OSA 2>&1 | tee -a "$SUMMARY" || echo "sidebar navigation failed (best effort)"
 tell application "M365Hub" to activate
-delay 3
+delay 2
 tell application "System Events"
-  set frontmost of process "M365Hub" to true
-  delay 1
-  set winPos to position of window 1 of process "M365Hub"
-  set winSize to size of window 1 of process "M365Hub"
-  -- Password field: ~50% width / 51% height of the window.
-  set cx to (item 1 of winPos) + (item 1 of winSize) / 2
-  set cy to (item 2 of winPos) + (item 2 of winSize) * 0.51
-  click at {cx, cy}
-  delay 1
-  -- Tab as well, so focus is in the field even if the click missed.
-  keystroke tab
-  delay 1
-  keystroke "$NEW_PASS"
-  delay 1
-  -- Click 登录 by coordinates too (~50% width / 57% height) instead
-  -- of relying on Return submitting the SecureField.
-  set by to (item 2 of winPos) + (item 2 of winSize) * 0.57
-  click at {cx, by}
-  delay 4
   tell process "M365Hub"
-    -- Sidebar: the 本地记忆 row.
     try
       click static text "本地记忆" of window 1
       delay 2
@@ -148,9 +148,12 @@ print("PASS: seeded memory is gone after delete")
 PY
 [ $? -ne 0 ] && fail "delete did not remove the seed (see above)"
 
-echo "== quit the app =="
+echo "== quit the app and stop the gateway =="
 osascript -e 'tell application "M365Hub" to quit' 2>/dev/null || pkill -f "M365Hub.app" || true
 sleep 2
+kill "$GW_PID" 2>/dev/null || true
+sleep 1
+pkill -f "m365hub serve" 2>/dev/null || true
 
 echo "== summary =="
 cat "$SUMMARY"

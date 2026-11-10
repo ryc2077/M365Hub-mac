@@ -1,0 +1,36 @@
+// Seed the m365hub_admin session cookie into the shared cookie storage
+// so the Mac app (URLSession.shared) sees itself as logged in and skips
+// its login screen. Used by the CI memory test: synthetic keystrokes and
+// coordinate clicks do not reach the app in the runner's GUI session, so
+// the login screen cannot be driven through the UI at all.
+// Usage: swift seed-session.swift <cookie-value>
+// The app is not sandboxed, so it reads the same shared cookie storage
+// this script writes.
+import Foundation
+
+guard CommandLine.arguments.count == 2 else {
+    fputs("usage: seed-session.swift <cookie-value>\n", stderr)
+    exit(2)
+}
+let value = CommandLine.arguments[1]
+let props: [HTTPCookiePropertyKey: Any] = [
+    .name: "m365hub_admin",
+    .value: value,
+    .domain: "127.0.0.1",
+    .path: "/",
+    .secure: false,
+]
+guard let cookie = HTTPCookie(properties: props) else {
+    fputs("failed to create cookie\n", stderr)
+    exit(1)
+}
+HTTPCookieStorage.shared.setCookie(cookie)
+// Give the shared store a moment to persist before the app reads it.
+Thread.sleep(forTimeInterval: 1)
+let stored = HTTPCookieStorage.shared.cookies(for: URL(string: "http://127.0.0.1:8230")!) ?? []
+if stored.contains(where: { $0.name == "m365hub_admin" }) {
+    print("cookie seeded: m365hub_admin present for 127.0.0.1")
+} else {
+    fputs("cookie NOT stored\n", stderr)
+    exit(1)
+}
