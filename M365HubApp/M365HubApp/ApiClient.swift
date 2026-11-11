@@ -68,7 +68,11 @@ enum API {
 
     static func login(password: String, completion: @escaping (Result<Bool, Error>) -> Void) {
         // Result value = mustChangePassword.
-        request("/api/admin/login", method: "POST", body: ["password": password]) { r in
+        // Explicit 10s timeout: the old 120s default left the login
+        // button looking dead for up to two minutes when the gateway
+        // on 8230 accepted the connection but never answered, with no
+        // spinner and no error in the meantime.
+        request("/api/admin/login", method: "POST", body: ["password": password], timeout: 10) { r in
             switch r {
             case .success(let d):
                 completion(.success(d["must_change_password"] as? Bool ?? false))

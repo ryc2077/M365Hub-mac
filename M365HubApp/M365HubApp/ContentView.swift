@@ -61,6 +61,7 @@ struct ContentView: View {
     @State private var mustChange = false
     @State private var password = ""
     @State private var error = ""
+    @State private var loggingIn = false
     @State private var columnVisibility = NavigationSplitViewVisibility.all
 
     var body: some View {
@@ -68,8 +69,12 @@ struct ContentView: View {
             if loggedIn == true {
                 mainView
             } else {
-                LoginView(mustChange: $mustChange, password: $password, error: $error) {
+                LoginView(mustChange: $mustChange, password: $password, error: $error, loggingIn: $loggingIn) {
+                    guard !loggingIn else { return }
+                    loggingIn = true
+                    error = ""
                     API.login(password: password) { r in
+                        loggingIn = false
                         switch r {
                         case .success(let mc):
                             if mc { mustChange = true }
@@ -160,6 +165,7 @@ struct LoginView: View {
     @Binding var mustChange: Bool
     @Binding var password: String
     @Binding var error: String
+    @Binding var loggingIn: Bool
     var onLogin: () -> Void
     @State private var current = ""
     @State private var next = ""
@@ -180,7 +186,9 @@ struct LoginView: View {
             } else {
                 SecureField("管理员密码", text: $password)
                     .onSubmit(onLogin)
-                Button("登录", action: onLogin)
+                    .disabled(loggingIn)
+                Button(loggingIn ? "正在登录…" : "登录", action: onLogin)
+                    .disabled(loggingIn)
             }
             if !error.isEmpty { Text(error).foregroundStyle(.red) }
         }
