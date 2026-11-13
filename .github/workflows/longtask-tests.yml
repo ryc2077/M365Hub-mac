@@ -69,6 +69,7 @@ jobs:
           mkdir -p test-evidence
           cp "${RUNNER_TEMP}"/longtask-summary.txt test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}"/lt-*.json test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}"/lt-*.out test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}"/lt-*.txt test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}"/lt-*.log test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}"/lt-npm-*.log test-evidence/ 2>/dev/null || true

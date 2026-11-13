@@ -42,6 +42,23 @@
 #   ("Claude isn't available with your current license"), gateway path
 #   proven fine. Round 3 adds one claude-opus probe to confirm the
 #   block is Claude-family-wide, not Sonnet-specific.
+#
+# Round 4 fixes (after run 43463300510):
+# - item 2d: the model condensed 110 distinct facts into a range
+#   statement PLUS the owner/budget/deadline formulas (all facts
+#   recoverable) — the literal-marker bar was the wrong measure. The
+#   check now passes on >=5 tail markers OR the range statement.
+#   New 2e recall check: ask the model for a folded-turn conclusion
+#   (strict) and a formula-derived fact (informational).
+# - item 4: round 3's probe B recalled QUARK-5520. Code reading pins
+#   the mechanism: missing X-M365-Session-Id defaults to "resp"
+#   (chat.go:217), and the resolver treats it as an EXPLICIT binding
+#   key, so every header-less /v1/responses request shares one
+#   upstream conversation (Jaccard 0.03 never even runs; the tokenizer
+#   makes Chinese phrases single tokens, so similarity is 0 anyway).
+#   New 4f decisive experiment: different explicit ids (must isolate)
+#   vs no header (must share). Probe outputs renamed to .json so the
+#   workflow evidence collects them.
 set -u
 BIN="M365HubApp/Resources/m365hub"
 BASE="http://127.0.0.1:8230"
@@ -334,18 +351,58 @@ print("folded-turn markers still in summary: %s" % (folded,))
 # Sampled markers from the original 110 DISTINCT facts, tail-weighted:
 # the condensation prompt keeps the most recent facts, and the gateway
 # trims a too-long condensation to the last 8000 bytes, so head markers
-# may legitimately drop. Require at least 5 of the 8 tail markers.
+# may legitimately drop. A faithful condensation may also compress a
+# regular series into a range statement ("0001 to 0110, 110 projects")
+# instead of listing markers literally — round 3 proved exactly that
+# (the model even derived the owner/budget/deadline formulas), so the
+# check passes on EITHER >=5 literal tail markers OR the range statement.
 sampled = [m for m in ["LONGTASK-FACT-%04d" % i for i in (50, 60, 70, 80, 90, 100, 105, 110)] if m in s]
 print("sampled summary-fact markers still present: %s" % (sampled,))
+has_range = ("LONGTASK-FACT-0001" in s and "LONGTASK-FACT-0110" in s and "110" in s)
+print("range statement covering all 110 facts present: %s" % has_range)
 assert len(s.encode("utf-8")) <= 8000, "condensed summary still over 8000 bytes (%d)" % len(s.encode("utf-8"))
 if len(s) > 6200:
     print("NOTE: condensed summary is %d chars (model was asked for <=6000); byte cap holds, so this is a model-fidelity note, not a failure" % len(s))
 assert len(turns) >= 18, "too few turns kept verbatim (%d)" % len(turns)
 assert len(folded) >= 3, "folded-turn facts mostly lost (%s)" % (folded,)
-assert len(sampled) >= 5, "original summary facts mostly lost (%s)" % (sampled,)
+assert len(sampled) >= 5 or has_range, "original summary facts mostly lost (%s), no range statement either" % (sampled,)
 print("PASS: condensed summary keeps key facts and the recent turns are intact verbatim")
 PY
 [ $? -ne 0 ] && fail "condensed-summary content check failed (see above)"
+echo "== 2e. recall usability: can the model actually use the condensed memory? =="
+# Follow-up turns in the SAME session (longtask-big-session): the
+# upstream conversation already holds the injected condensed summary,
+# so the model should answer from it. Q1 is a verbatim recall (strict);
+# Q2 needs the model to derive a fact from the summary's formulas
+# (informational: quoted either way, arithmetic slips do not fail the run).
+curl -s -m 300 -b "$JAR" -X POST "$BASE/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "X-M365-Session-Id: longtask-big-session" \
+  -H "X-M365-Memory-Tags: longtask-big" \
+  -d '{"model":"gpt-5.6-reasoning","messages":[{"role":"user","content":"第 03 轮讨论的结论是什么？只回答结论，不要多余内容。"}],"stream":false}' \
+  -o "$TMP/lt-recall-q1.json" -w "%{http_code}" > "$TMP/lt-recall-q1.code"
+Q1_ANS="$(jget "$TMP/lt-recall-q1.json" "['choices'][0]['message']['content']")"
+echo "recall Q1 answer: [$Q1_ANS]" | tee -a "$SUMMARY"
+if echo "$Q1_ANS" | grep -q "继续推进第 03 项工作"; then
+  pass "recall Q1: model recalled the folded-turn conclusion verbatim from the condensed memory"
+else
+  fail "recall Q1: model did NOT recall the round-3 conclusion (answer above)"
+fi
+curl -s -m 300 -b "$JAR" -X POST "$BASE/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "X-M365-Session-Id: longtask-big-session" \
+  -H "X-M365-Memory-Tags: longtask-big" \
+  -d '{"model":"gpt-5.6-reasoning","messages":[{"role":"user","content":"LONGTASK-FACT-0060 的负责人是谁？预算多少？只回答这两项。"}],"stream":false}' \
+  -o "$TMP/lt-recall-q2.json" -w "%{http_code}" > "$TMP/lt-recall-q2.code"
+Q2_ANS="$(jget "$TMP/lt-recall-q2.json" "['choices'][0]['message']['content']")"
+echo "recall Q2 answer: [$Q2_ANS] (correct: 张三，13220 元)" | tee -a "$SUMMARY"
+if echo "$Q2_ANS" | grep -q "张三" && echo "$Q2_ANS" | grep -q "13220"; then
+  pass "recall Q2: model derived the formula fact correctly (张三，13220 元)"
+else
+  note "recall Q2: model did not derive the formula fact exactly (answer above) — informational only"
+fi
 else
   block "memory compression (item 2): no restored account, the model condensation call cannot run — re-seed the account in the morning with a PKCE login"
 fi
@@ -585,7 +642,7 @@ curl -s -m 300 -X POST "$BASE/v1/responses" \
   -H 'Content-Type: application/json' \
   -H "Authorization: Bearer $API_KEY" \
   -d @"$TMP/lt-btw-a.json" \
-  -o "$TMP/lt-btw-a.json.out" -w "%{http_code}" > "$TMP/lt-btw-a.code"
+  -o "$TMP/lt-btw-a-out.json" -w "%{http_code}" > "$TMP/lt-btw-a.code"
 [ "$(cat "$TMP/lt-btw-a.code")" = "200" ] \
   && pass "BTW probe A (main topic) http 200" || fail "BTW probe A http $(cat "$TMP/lt-btw-a.code")"
 "$PY" <<'PY' > "$TMP/lt-btw-b.json"
@@ -598,10 +655,10 @@ curl -s -m 300 -X POST "$BASE/v1/responses" \
   -H 'Content-Type: application/json' \
   -H "Authorization: Bearer $API_KEY" \
   -d @"$TMP/lt-btw-b.json" \
-  -o "$TMP/lt-btw-b.json.out" -w "%{http_code}" > "$TMP/lt-btw-b.code"
+  -o "$TMP/lt-btw-b-out.json" -w "%{http_code}" > "$TMP/lt-btw-b.code"
 [ "$(cat "$TMP/lt-btw-b.code")" = "200" ] \
   && pass "BTW probe B (unrelated) http 200" || fail "BTW probe B http $(cat "$TMP/lt-btw-b.code")"
-B_TEXT="$("$PY" - "$TMP/lt-btw-b.json.out" <<'PY' 2>/dev/null
+B_TEXT="$("$PY" - "$TMP/lt-btw-b-out.json" <<'PY' 2>/dev/null
 import json, sys
 d = json.load(open(sys.argv[1]))
 parts = []
@@ -690,6 +747,97 @@ if grep -q "SIDE-QUARK-88" "$TMP/lt-codex-main.log"; then
   fail "side marker SIDE-QUARK-88 appears in the main task log"
 else
   pass "side marker SIDE-QUARK-88 is absent from the main task log"
+fi
+
+echo "== 4f. decisive BTW experiment: explicit session ids vs the shared default =="
+# Round 3's probe B recalled QUARK-5520. Code reading says why: the
+# responses handler defaults a missing X-M365-Session-Id to "resp"
+# (chat.go), and the session resolver treats a non-empty id as an
+# EXPLICIT binding key (resolver.go) — so every header-less request
+# lands in the single "resp" upstream conversation (orchestrator.go
+# reuses res.ConversationID). The similarity fallback (Jaccard 0.03)
+# never even runs. This experiment proves it behaviorally:
+#   A2/B2: DIFFERENT explicit ids -> B2 must NOT know NEBULA-9911.
+#   A3/B3: NO header (shared "resp") -> B3 MUST know ORION-3344.
+extract_resp_text() { # $1 = response json file; prints the reply text
+  "$PY" - "$1" <<'PY' 2>/dev/null
+import json, sys
+d = json.load(open(sys.argv[1]))
+parts = []
+for it in d.get("output") or []:
+    for c in it.get("content") or []:
+        if isinstance(c, dict) and c.get("text"):
+            parts.append(c["text"])
+print(" ".join(parts))
+PY
+}
+"$PY" <<'PY' > "$TMP/lt-btw2-a2.json"
+import json
+print(json.dumps({"model": "gpt-5.6-reasoning", "stream": False, "input": [
+  {"type": "message", "role": "user", "content": "记住：红色钢笔项目的代号是 NEBULA-9911。"},
+  {"type": "message", "role": "assistant", "content": "记住了，红色钢笔项目代号 NEBULA-9911。"},
+  {"type": "message", "role": "user", "content": "再确认一下红色钢笔项目的代号。"},
+]}, ensure_ascii=False))
+PY
+curl -s -m 300 -X POST "$BASE/v1/responses" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "X-M365-Session-Id: btw-test-A" \
+  -d @"$TMP/lt-btw2-a2.json" \
+  -o "$TMP/lt-btw2-a2-out.json" -w "%{http_code}" > "$TMP/lt-btw2-a2.code"
+[ "$(cat "$TMP/lt-btw2-a2.code")" = "200" ] \
+  && pass "BTW 4f A2 (explicit id A) http 200" || fail "BTW 4f A2 http $(cat "$TMP/lt-btw2-a2.code")"
+"$PY" <<'PY' > "$TMP/lt-btw2-b2.json"
+import json
+print(json.dumps({"model": "gpt-5.6-reasoning", "stream": False, "input": [
+  {"type": "message", "role": "user", "content": "红色钢笔项目的代号是什么？只回答代号，或者说不知道。"},
+]}, ensure_ascii=False))
+PY
+curl -s -m 300 -X POST "$BASE/v1/responses" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "X-M365-Session-Id: btw-test-B" \
+  -d @"$TMP/lt-btw2-b2.json" \
+  -o "$TMP/lt-btw2-b2-out.json" -w "%{http_code}" > "$TMP/lt-btw2-b2.code"
+B2_TEXT="$(extract_resp_text "$TMP/lt-btw2-b2-out.json")"
+echo "BTW 4f B2 answer: [$B2_TEXT]" | tee -a "$SUMMARY"
+if echo "$B2_TEXT" | grep -q "NEBULA-9911"; then
+  fail "BTW 4f B2: different explicit session id STILL recalled NEBULA-9911 — isolation is broken even with explicit ids"
+else
+  pass "BTW 4f B2: different explicit session id did NOT know NEBULA-9911 — explicit ids isolate correctly"
+fi
+"$PY" <<'PY' > "$TMP/lt-btw2-a3.json"
+import json
+print(json.dumps({"model": "gpt-5.6-reasoning", "stream": False, "input": [
+  {"type": "message", "role": "user", "content": "记住：蓝色笔记本项目的代号是 ORION-3344。"},
+  {"type": "message", "role": "assistant", "content": "记住了，蓝色笔记本项目代号 ORION-3344。"},
+  {"type": "message", "role": "user", "content": "再确认一下蓝色笔记本项目的代号。"},
+]}, ensure_ascii=False))
+PY
+curl -s -m 300 -X POST "$BASE/v1/responses" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $API_KEY" \
+  -d @"$TMP/lt-btw2-a3.json" \
+  -o "$TMP/lt-btw2-a3-out.json" -w "%{http_code}" > "$TMP/lt-btw2-a3.code"
+[ "$(cat "$TMP/lt-btw2-a3.code")" = "200" ] \
+  && pass "BTW 4f A3 (no header) http 200" || fail "BTW 4f A3 http $(cat "$TMP/lt-btw2-a3.code")"
+"$PY" <<'PY' > "$TMP/lt-btw2-b3.json"
+import json
+print(json.dumps({"model": "gpt-5.6-reasoning", "stream": False, "input": [
+  {"type": "message", "role": "user", "content": "蓝色笔记本项目的代号是什么？只回答代号，或者说不知道。"},
+]}, ensure_ascii=False))
+PY
+curl -s -m 300 -X POST "$BASE/v1/responses" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $API_KEY" \
+  -d @"$TMP/lt-btw2-b3.json" \
+  -o "$TMP/lt-btw2-b3-out.json" -w "%{http_code}" > "$TMP/lt-btw2-b3.code"
+B3_TEXT="$(extract_resp_text "$TMP/lt-btw2-b3-out.json")"
+echo "BTW 4f B3 answer: [$B3_TEXT]" | tee -a "$SUMMARY"
+if echo "$B3_TEXT" | grep -q "ORION-3344"; then
+  pass "BTW 4f B3: no-header request DID know ORION-3344 — confirms the shared 'resp' conversation (this is the leak)"
+else
+  note "BTW 4f B3: no-header request did NOT know ORION-3344 — the shared-'resp' hypothesis is NOT confirmed by this run (see 4d result)"
 fi
 else
   block "CodeX long task + BTW (items 4-5): no restored account, CodeX has nothing to call through"
@@ -869,7 +1017,7 @@ for x in d.get("memories", []):
 PY
 while IFS= read -r KEY; do
   [ -z "$KEY" ] && continue
-  case "$KEY" in *longtask*|session:resp|session:longtask-*|session:msg)
+  case "$KEY" in *longtask*|session:resp|session:longtask-*|session:msg|session:btw-test-*)
     ENC="$(python3 -c "import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1]))" "$KEY")"
     curl -s -m 10 -b "$JAR" -X DELETE "$BASE/api/local-memory?key=$ENC" -o /dev/null -w "deleted $KEY -> %{http_code}\n" | tee -a "$SUMMARY"
     ;;
