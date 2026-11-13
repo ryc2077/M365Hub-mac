@@ -30,6 +30,18 @@
 #   tools) to isolate the gateway path, then the CLI with the registered
 #   Anthropic-style model id claude-sonnet-4-20250514 (round 1's
 #   claude-sonnet only drew an unrecognized-model warning) plus --debug.
+#
+# Round 3 fixes (after run 43462012151):
+# - item 2d only: the mechanism is proven (compression fired twice,
+#   condensation finished in <10s, 513-char summary, flag cleared, 20
+#   turns intact, all 7 folded-turn markers kept), but the sampled bar
+#   was wrong for 200 near-identical facts — the model rightly kept
+#   only the most recent ones. Seed is now 110 DISTINCT facts (own
+#   owner/budget/deadline each), sample is 8 tail markers, require >=5.
+# - item 6: round 2 nailed the root cause — upstream license refusal
+#   ("Claude isn't available with your current license"), gateway path
+#   proven fine. Round 3 adds one claude-opus probe to confirm the
+#   block is Claude-family-wide, not Sonnet-specific.
 set -u
 BIN="M365HubApp/Resources/m365hub"
 BASE="http://127.0.0.1:8230"
@@ -80,15 +92,20 @@ data["memories"]["tag:longtask-mem1"] = {
         {"role": "assistant", "content": "你好，这是第二轮", "at": "2026-11-14T00:01:00Z"},
     ],
 }
-# Item 2: over-cap memory. Summary ~12600 chars / ~23800 bytes (200
-# numbered facts) + 25 fact turns (~3150 bytes) -> total ~27000 bytes,
-# well over the 16000-byte compression threshold (Go len() counts BYTES;
+# Item 2: over-cap memory. Summary ~8100 chars / ~15100 bytes (110
+# DISTINCT facts) + 25 fact turns (~3150 bytes) -> total ~18300 bytes,
+# over the 16000-byte compression threshold (Go len() counts BYTES;
 # the round-1 seed was 15049 bytes and never compressed). One more chat
 # turn folds the oldest turns into the summary and marks it NeedsSummary
 # for model condensation.
+owners = ["张三", "李四", "王五", "赵六", "陈七", "刘八"]
 facts = []
-for i in range(1, 201):
-    facts.append("事实%04d：记住：项目代号是 LONGTASK-FACT-%04d，负责人是张三，截止 2026-12-%02d，状态进行中。" % (i, i, (i % 28) + 1))
+for i in range(1, 111):
+    # DISTINCT facts (different owner / budget / deadline each): a
+    # faithful condensation can keep most of them, so the preservation
+    # check below is a real test. Round 2 used 200 near-identical facts
+    # and the model rightly kept only the most recent ones.
+    facts.append("事实%04d：记住：项目代号是 LONGTASK-FACT-%04d，负责人是%s，预算 %d 元，截止 2026-12-%02d，状态进行中。" % (i, i, owners[i % 6], 5000 + i * 137, (i % 28) + 1))
 summary = "\n".join(facts)
 turns = []
 for i in range(1, 26):
@@ -310,20 +327,22 @@ assert md is not None, "tag:longtask-big missing from file"
 s = md.get("summary") or ""
 turns = md.get("turns") or []
 print("condensed summary chars|bytes: %d|%d, turns kept: %d" % (len(s), len(s.encode("utf-8")), len(turns)))
+print("condensed summary text (first 1200 chars): %s" % s[:1200])
 # Fact markers folded in from the oldest turns (LONGTASK-FACT-0101..0107).
 folded = [m for m in ["LONGTASK-FACT-010%d" % i for i in range(1, 8)] if m in s]
 print("folded-turn markers still in summary: %s" % (folded,))
-# Sampled markers from the original 200-fact summary (tail-weighted: the
-# condensation prompt keeps the most recent facts, and the gateway trims
-# to the last 8000 bytes, so head markers may legitimately drop).
-sampled = [m for m in ["LONGTASK-FACT-0100","LONGTASK-FACT-0150","LONGTASK-FACT-0175","LONGTASK-FACT-0200"] if m in s]
+# Sampled markers from the original 110 DISTINCT facts, tail-weighted:
+# the condensation prompt keeps the most recent facts, and the gateway
+# trims a too-long condensation to the last 8000 bytes, so head markers
+# may legitimately drop. Require at least 5 of the 8 tail markers.
+sampled = [m for m in ["LONGTASK-FACT-%04d" % i for i in (50, 60, 70, 80, 90, 100, 105, 110)] if m in s]
 print("sampled summary-fact markers still present: %s" % (sampled,))
 assert len(s.encode("utf-8")) <= 8000, "condensed summary still over 8000 bytes (%d)" % len(s.encode("utf-8"))
 if len(s) > 6200:
     print("NOTE: condensed summary is %d chars (model was asked for <=6000); byte cap holds, so this is a model-fidelity note, not a failure" % len(s))
 assert len(turns) >= 18, "too few turns kept verbatim (%d)" % len(turns)
 assert len(folded) >= 3, "folded-turn facts mostly lost (%s)" % (folded,)
-assert len(sampled) >= 2, "original summary facts mostly lost (%s)" % (sampled,)
+assert len(sampled) >= 5, "original summary facts mostly lost (%s)" % (sampled,)
 print("PASS: condensed summary keeps key facts and the recent turns are intact verbatim")
 PY
 [ $? -ne 0 ] && fail "condensed-summary content check failed (see above)"
@@ -819,6 +838,21 @@ else
   fail "Claude Code append round failed"
   cat "$CLAUDE_DIR/hello-claude.txt" 2>&1 | tee -a "$SUMMARY"
   tail -n 20 "$TMP/lt-claude-2.log" | tee -a "$SUMMARY"
+fi
+echo "== 6e. probe: claude-opus (is the refusal Claude-family-wide, or Sonnet-specific?) =="
+curl -s -m 300 -X POST "$BASE/v1/messages" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CLAUDE_KEY" \
+  -d '{"model":"claude-opus","max_tokens":256,"messages":[{"role":"user","content":"Reply with exactly: PROBE-OPUS-OK"}]}' \
+  -o "$TMP/lt-probe-opus.json" -w "%{http_code}" > "$TMP/lt-probe-opus.code"
+echo "opus probe http $(cat "$TMP/lt-probe-opus.code")" | tee -a "$SUMMARY"
+cat "$TMP/lt-probe-opus.json" | tee -a "$SUMMARY"
+if grep -q "isn't available with your current license" "$TMP/lt-probe-opus.json"; then
+  pass "opus probe: same license refusal — the block is Claude-family-wide, not Sonnet-specific"
+elif grep -q "PROBE-OPUS-OK" "$TMP/lt-probe-opus.json"; then
+  note "opus probe: Opus answered (Sonnet-only block?) — see body above"
+else
+  note "opus probe: unexpected response (see body above)"
 fi
 else
   block "Claude Code (item 6): no restored account, /v1/messages has nothing to call through"
