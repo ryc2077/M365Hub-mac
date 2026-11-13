@@ -1,0 +1,90 @@
+name: Long-task tests
+
+# Overnight long-task verification (memory usability, memory compression,
+# session compression via remote compaction v2, BTW side-chat isolation,
+# a real CodeX long task, Claude Code via /v1/messages). Manual dispatch
+# only: it runs the real model against the restored account, so it must
+# never fire on every push.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  longtask:
+    # macos-15 ships Xcode 16.x, matching the Mac the app is tested on.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Restore the gateway data dir (~/.config/m365hub: accounts +
+      # tokens) from the previous run, so the real account survives
+      # between runs. On the first run there is no cache and the
+      # restore is a no-op; the script then marks every model item
+      # BLOCKED instead of failing (only a PKCE login can re-seed it).
+      - name: Restore gateway data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.config/m365hub
+          key: m365hub-mac-data-${{ github.run_id }}
+          restore-keys: |
+            m365hub-mac-data-
+
+      # The whole suite: memory, compression, BTW, CodeX, Claude Code.
+      # Runs against the repo-bundled gateway binary directly (no Xcode
+      # build); see scripts/test-longtask.sh for the item list.
+      - name: Long-task tests
+        run: bash scripts/test-longtask.sh
+
+      # Save the gateway data dir for the next run. Only when an account
+      # is actually in it, so a failed run can never overwrite the good
+      # cache with an empty data dir. The test script already stops its
+      # own gateway and deletes every test memory key before this step.
+      - name: Check for a saved account
+        id: check-account
+        if: always()
+        run: |
+          pkill -f "m365hub serve" 2>/dev/null || true
+          sleep 2
+          if grep -q "copilot@wt3z38wld.onmicrosoft.com" "$HOME/.config/m365hub/accounts.json" 2>/dev/null; then
+            echo "has_account=true" >> "$GITHUB_OUTPUT"
+            echo "account present in the data dir; the cache will be saved"
+          else
+            echo "has_account=false" >> "$GITHUB_OUTPUT"
+            echo "no account in the data dir; the cache will NOT be saved"
+          fi
+
+      - name: Save gateway data cache
+        if: always() && steps.check-account.outputs.has_account == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.config/m365hub
+          key: m365hub-mac-data-${{ github.run_id }}
+
+      - name: Collect test evidence
+        if: always()
+        run: |
+          mkdir -p test-evidence
+          cp "${RUNNER_TEMP}"/longtask-summary.txt test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}"/lt-*.json test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}"/lt-*.txt test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}"/lt-*.log test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}"/lt-npm-*.log test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}"/codex-longtask/notes.py test-evidence/codex-notes.py 2>/dev/null || true
+          cp "${RUNNER_TEMP}"/codex-longtask/README.md test-evidence/codex-README.md 2>/dev/null || true
+          cp "${RUNNER_TEMP}"/codex-longtask/tests/test_notes.py test-evidence/codex-test_notes.py 2>/dev/null || true
+          cp "${RUNNER_TEMP}"/codex-longtask/docs/consistency-report.txt test-evidence/codex-consistency-report.txt 2>/dev/null || true
+          cp "${RUNNER_TEMP}"/codex-longtask/docs/design-1.txt test-evidence/codex-design-1.txt 2>/dev/null || true
+          cp "${RUNNER_TEMP}"/claude-longtask/hello-claude.txt test-evidence/claude-hello.txt 2>/dev/null || true
+          cp "$HOME/.config/m365hub/serve-longtask.log" test-evidence/ 2>/dev/null || true
+          ls -la test-evidence/
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: longtask-test-evidence
+          path: test-evidence/
+          if-no-files-found: warn
