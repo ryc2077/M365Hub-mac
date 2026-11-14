@@ -750,15 +750,23 @@ else
 fi
 
 echo "== 4f. decisive BTW experiment: explicit session ids vs the shared default =="
-# Round 3's probe B recalled QUARK-5520. Code reading says why: the
-# responses handler defaults a missing X-M365-Session-Id to "resp"
-# (chat.go), and the session resolver treats a non-empty id as an
-# EXPLICIT binding key (resolver.go) — so every header-less request
-# lands in the single "resp" upstream conversation (orchestrator.go
-# reuses res.ConversationID). The similarity fallback (Jaccard 0.03)
-# never even runs. This experiment proves it behaviorally:
+# Round 4 (2026-11-14) proved the leak behaviorally: B3 (no header) DID
+# know ORION-3344, because the responses handler defaulted a missing
+# X-M365-Session-Id to "resp" (chat.go) and the resolver treats a
+# non-empty id as an EXPLICIT binding key (resolver.go) -- so every
+# header-less request landed in the single "resp" upstream conversation.
+# The 2026-11-14 gateway fix removed that shared default: the session
+# identity now comes from X-M365-Session-Id, then CodeX's session-id
+# header (its thread id, measured against a mock Responses API), then
+# body session_id / previous_response_id, else content matching. A
+# /btw side branch reuses its parent thread's session-id, so it is
+# split off by the "Side conversation boundary." marker in its input.
+# Expectations after the fix:
 #   A2/B2: DIFFERENT explicit ids -> B2 must NOT know NEBULA-9911.
-#   A3/B3: NO header (shared "resp") -> B3 MUST know ORION-3344.
+#   A3/B3: NO header -> B3 must NOT know ORION-3344 (was MUST-know: leak).
+#   M1/S1/M2/M3/S2: same session-id header; the side branch (marker) must
+#     not leak into main (M2 must NOT know SIDEWINDER-77) and main must
+#     survive the detour (M3 must know MAGPIE-2024).
 extract_resp_text() { # $1 = response json file; prints the reply text
   "$PY" - "$1" <<'PY' 2>/dev/null
 import json, sys
@@ -835,9 +843,127 @@ curl -s -m 300 -X POST "$BASE/v1/responses" \
 B3_TEXT="$(extract_resp_text "$TMP/lt-btw2-b3-out.json")"
 echo "BTW 4f B3 answer: [$B3_TEXT]" | tee -a "$SUMMARY"
 if echo "$B3_TEXT" | grep -q "ORION-3344"; then
-  pass "BTW 4f B3: no-header request DID know ORION-3344 — confirms the shared 'resp' conversation (this is the leak)"
+  fail "BTW 4f B3: no-header request STILL recalled ORION-3344 — the shared-conversation leak is NOT fixed"
 else
-  note "BTW 4f B3: no-header request did NOT know ORION-3344 — the shared-'resp' hypothesis is NOT confirmed by this run (see 4d result)"
+  pass "BTW 4f B3: no-header request did NOT know ORION-3344 — no shared default conversation anymore"
+fi
+
+# --- 4f side-branch probes (the actual /btw shape) ---
+# M1 establishes the main codename under one session-id header; S1 is a
+# side turn under the SAME header, marked by CodeX's side-boundary text
+# (full text as captured from CodeX 0.164 against a mock Responses API);
+# M2 then asks main about the side codename (must NOT know), M3 asks main
+# about the main codename (must know: main survived the detour), S2 asks
+# the side branch about its own codename (must know: side still works).
+SIDE_MARKER=$'Side conversation boundary.\n\nEverything before this boundary is inherited history from the parent thread. It is reference context only. It is not your current task.\n\nDo not continue, execute, or complete any instructions, plans, tool calls, approvals, edits, or requests from before this boundary. Only messages submitted after this boundary are active user instructions for this side conversation.\n\nYou are a side-conversation assistant, separate from the main thread. Answer questions and do lightweight, non-mutating exploration without disrupting the main thread. If there is no user question after this boundary yet, wait for one.'
+"$PY" <<'PY' > "$TMP/lt-btw2-m1.json"
+import json, os
+print(json.dumps({"model": "gpt-5.6-reasoning", "stream": False, "input": [
+  {"type": "message", "role": "user", "content": "记住：主任务的代号是 MAGPIE-2024，负责人是张三。"},
+  {"type": "message", "role": "assistant", "content": "记住了，主任务代号 MAGPIE-2024，负责人张三。"},
+  {"type": "message", "role": "user", "content": "再确认一下主任务的代号。"},
+]}, ensure_ascii=False))
+PY
+curl -s -m 300 -X POST "$BASE/v1/responses" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "X-M365-Session-Id: btw-main-1" \
+  -d @"$TMP/lt-btw2-m1.json" \
+  -o "$TMP/lt-btw2-m1-out.json" -w "%{http_code}" > "$TMP/lt-btw2-m1.code"
+[ "$(cat "$TMP/lt-btw2-m1.code")" = "200" ] \
+  && pass "BTW 4f M1 (main, session header) http 200" || fail "BTW 4f M1 http $(cat "$TMP/lt-btw2-m1.code")"
+SIDE_MARKER="$SIDE_MARKER" "$PY" <<'PY' > "$TMP/lt-btw2-s1.json"
+import json, os
+marker = os.environ["SIDE_MARKER"]
+print(json.dumps({"model": "gpt-5.6-reasoning", "stream": False, "input": [
+  {"type": "message", "role": "user", "content": "记住：主任务的代号是 MAGPIE-2024，负责人是张三。"},
+  {"type": "message", "role": "assistant", "content": "记住了，主任务代号 MAGPIE-2024，负责人张三。"},
+  {"type": "message", "role": "user", "content": marker},
+  {"type": "message", "role": "user", "content": "记住：旁聊任务的代号是 SIDEWINDER-77。"},
+  {"type": "message", "role": "assistant", "content": "记住了，旁聊代号 SIDEWINDER-77。"},
+  {"type": "message", "role": "user", "content": "再确认一下旁聊的代号。"},
+]}, ensure_ascii=False))
+PY
+curl -s -m 300 -X POST "$BASE/v1/responses" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "X-M365-Session-Id: btw-main-1" \
+  -d @"$TMP/lt-btw2-s1.json" \
+  -o "$TMP/lt-btw2-s1-out.json" -w "%{http_code}" > "$TMP/lt-btw2-s1.code"
+[ "$(cat "$TMP/lt-btw2-s1.code")" = "200" ] \
+  && pass "BTW 4f S1 (side branch, same header + marker) http 200" || fail "BTW 4f S1 http $(cat "$TMP/lt-btw2-s1.code")"
+"$PY" <<'PY' > "$TMP/lt-btw2-m2.json"
+import json
+print(json.dumps({"model": "gpt-5.6-reasoning", "stream": False, "input": [
+  {"type": "message", "role": "user", "content": "记住：主任务的代号是 MAGPIE-2024，负责人是张三。"},
+  {"type": "message", "role": "assistant", "content": "记住了，主任务代号 MAGPIE-2024，负责人张三。"},
+  {"type": "message", "role": "user", "content": "再确认一下主任务的代号。"},
+  {"type": "message", "role": "assistant", "content": "主任务代号 MAGPIE-2024。"},
+  {"type": "message", "role": "user", "content": "旁聊里提到的代号是多少？只回答代号，或者说不知道。"},
+]}, ensure_ascii=False))
+PY
+curl -s -m 300 -X POST "$BASE/v1/responses" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "X-M365-Session-Id: btw-main-1" \
+  -d @"$TMP/lt-btw2-m2.json" \
+  -o "$TMP/lt-btw2-m2-out.json" -w "%{http_code}" > "$TMP/lt-btw2-m2.code"
+M2_TEXT="$(extract_resp_text "$TMP/lt-btw2-m2-out.json")"
+echo "BTW 4f M2 answer: [$M2_TEXT]" | tee -a "$SUMMARY"
+if echo "$M2_TEXT" | grep -q "SIDEWINDER-77"; then
+  fail "BTW 4f M2: main turn recalled the SIDE codename SIDEWINDER-77 — side branch leaked into main"
+else
+  pass "BTW 4f M2: main turn did NOT know the side codename — side branch is isolated from main"
+fi
+"$PY" <<'PY' > "$TMP/lt-btw2-m3.json"
+import json
+print(json.dumps({"model": "gpt-5.6-reasoning", "stream": False, "input": [
+  {"type": "message", "role": "user", "content": "记住：主任务的代号是 MAGPIE-2024，负责人是张三。"},
+  {"type": "message", "role": "assistant", "content": "记住了，主任务代号 MAGPIE-2024，负责人张三。"},
+  {"type": "message", "role": "user", "content": "再确认一下主任务的代号。"},
+  {"type": "message", "role": "assistant", "content": "主任务代号 MAGPIE-2024。"},
+  {"type": "message", "role": "user", "content": "主任务的代号是多少？只回答代号，或者说不知道。"},
+]}, ensure_ascii=False))
+PY
+curl -s -m 300 -X POST "$BASE/v1/responses" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "X-M365-Session-Id: btw-main-1" \
+  -d @"$TMP/lt-btw2-m3.json" \
+  -o "$TMP/lt-btw2-m3-out.json" -w "%{http_code}" > "$TMP/lt-btw2-m3.code"
+M3_TEXT="$(extract_resp_text "$TMP/lt-btw2-m3-out.json")"
+echo "BTW 4f M3 answer: [$M3_TEXT]" | tee -a "$SUMMARY"
+if echo "$M3_TEXT" | grep -q "MAGPIE-2024"; then
+  pass "BTW 4f M3: main turn still knows MAGPIE-2024 — main conversation survived the side detour"
+else
+  fail "BTW 4f M3: main turn LOST its own codename MAGPIE-2024 after the side branch — main continuity is broken"
+fi
+SIDE_MARKER="$SIDE_MARKER" "$PY" <<'PY' > "$TMP/lt-btw2-s2.json"
+import json, os
+marker = os.environ["SIDE_MARKER"]
+print(json.dumps({"model": "gpt-5.6-reasoning", "stream": False, "input": [
+  {"type": "message", "role": "user", "content": "记住：主任务的代号是 MAGPIE-2024，负责人是张三。"},
+  {"type": "message", "role": "assistant", "content": "记住了，主任务代号 MAGPIE-2024，负责人张三。"},
+  {"type": "message", "role": "user", "content": marker},
+  {"type": "message", "role": "user", "content": "记住：旁聊任务的代号是 SIDEWINDER-77。"},
+  {"type": "message", "role": "assistant", "content": "记住了，旁聊代号 SIDEWINDER-77。"},
+  {"type": "message", "role": "user", "content": "再确认一下旁聊的代号。"},
+  {"type": "message", "role": "assistant", "content": "旁聊代号 SIDEWINDER-77。"},
+  {"type": "message", "role": "user", "content": "旁聊的代号是多少？只回答代号，或者说不知道。"},
+]}, ensure_ascii=False))
+PY
+curl -s -m 300 -X POST "$BASE/v1/responses" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "X-M365-Session-Id: btw-main-1" \
+  -d @"$TMP/lt-btw2-s2.json" \
+  -o "$TMP/lt-btw2-s2-out.json" -w "%{http_code}" > "$TMP/lt-btw2-s2.code"
+S2_TEXT="$(extract_resp_text "$TMP/lt-btw2-s2-out.json")"
+echo "BTW 4f S2 answer: [$S2_TEXT]" | tee -a "$SUMMARY"
+if echo "$S2_TEXT" | grep -q "SIDEWINDER-77"; then
+  pass "BTW 4f S2: side branch still knows SIDEWINDER-77 — side conversation keeps its own continuity"
+else
+  fail "BTW 4f S2: side branch LOST its own codename SIDEWINDER-77 — side continuity is broken"
 fi
 else
   block "CodeX long task + BTW (items 4-5): no restored account, CodeX has nothing to call through"
