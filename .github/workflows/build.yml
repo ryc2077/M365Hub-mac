@@ -39,6 +39,12 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build
 
+      # Unit-test the pure gateway-diagnostics helpers (lsof parsing,
+      # log tail, failure-state file) with a plain swiftc harness —
+      # no Xcode project, no app target.
+      - name: Gateway diagnostics unit test
+        run: bash scripts/test-gateway-diagnostics.sh
+
       # The app hangs on "正在启动本地网关…" when its gateway never
       # answers, so the build is not done until the bundled gateway is
       # proven to start and answer /api/admin/session, cold, the way the
@@ -52,6 +58,15 @@ jobs:
       - name: Launch app and screenshot
         continue-on-error: true
         run: bash scripts/test-applaunch.sh build/Build/Products/Debug/M365Hub.app
+
+      # Hung-gateway self-heal test (1.0.28): a hung process named
+      # exactly "m365hub" holding 8230 must be cleared by the app and
+      # its own gateway must answer; a hung foreign process must not
+      # be killed and must produce the failure state naming it. Runs
+      # here, before the account test, so the data dir it wipes is
+      # still fresh and the account test starts clean.
+      - name: Hung-gateway self-heal test
+        run: bash scripts/test-hung-gateway.sh build/Build/Products/Debug/M365Hub.app
 
       # Account-add + chat, through the exact endpoints the Mac UI calls:
       # admin login (forced password change), accounts list, PKCE/device
@@ -184,6 +199,10 @@ jobs:
           cp "${RUNNER_TEMP}/codex-reasoning-test/reasoning-model.txt" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-gateway-test/serve-test.log" test-evidence/ 2>/dev/null || true
           cp "$HOME/.config/m365hub/serve-mac.log" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-hung-gateway-summary.txt" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-hung-gateway-shot.png" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-hung-gateway-fail-shot.png" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-hung-gateway-state.json" test-evidence/ 2>/dev/null || true
           ls -la test-evidence/
 
       - name: Upload built app

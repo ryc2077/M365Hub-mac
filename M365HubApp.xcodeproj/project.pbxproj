@@ -15,6 +15,7 @@
 		AA0000010000000000000006 /* Glass.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000020000000000000006 /* Glass.swift */; };
 		AA0000010000000000000007 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000020000000000000007 /* Models.swift */; };
 		AA0000010000000000000009 /* MathView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000020000000000000009 /* MathView.swift */; };
+		AA0000010000000000000012 /* GatewayDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000020000000000000012 /* GatewayDiagnostics.swift */; };
 		AA0000080000000000000003 /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000080000000000000002 /* SwiftMath */; };
 		AA0000010000000000000008 /* m365hub in Resources */ = {isa = PBXBuildFile; fileRef = AA0000020000000000000008 /* m365hub */; };
 		AA0000010000000000000010 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000020000000000000010 /* Assets.xcassets */; };
@@ -29,6 +30,7 @@
 		AA0000020000000000000006 /* Glass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = M365HubApp/Glass.swift; sourceTree = "<group>"; };
 		AA0000020000000000000007 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = M365HubApp/Models.swift; sourceTree = "<group>"; };
 		AA0000020000000000000009 /* MathView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = M365HubApp/MathView.swift; sourceTree = "<group>"; };
+		AA0000020000000000000012 /* GatewayDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = M365HubApp/GatewayDiagnostics.swift; sourceTree = "<group>"; };
 		AA0000020000000000000008 /* m365hub */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = Resources/m365hub; sourceTree = "<group>"; };
 		AA0000020000000000000010 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = M365HubApp/Assets.xcassets; sourceTree = "<group>"; };
 		AA0000020000000000000011 /* M365Hub.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = M365Hub.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -65,6 +67,7 @@
 				AA0000020000000000000006 /* Glass.swift */,
 				AA0000020000000000000007 /* Models.swift */,
 				AA0000020000000000000009 /* MathView.swift */,
+				AA0000020000000000000012 /* GatewayDiagnostics.swift */,
 				AA0000020000000000000008 /* m365hub */,
 				AA0000020000000000000010 /* Assets.xcassets */,
 			);
@@ -162,6 +165,7 @@
 				AA0000010000000000000006 /* Glass.swift in Sources */,
 				AA0000010000000000000007 /* Models.swift in Sources */,
 				AA0000010000000000000009 /* MathView.swift in Sources */,
+				AA0000010000000000000012 /* GatewayDiagnostics.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -196,7 +200,7 @@
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.28;
 				PRODUCT_BUNDLE_IDENTIFIER = net.de5.m365hub;
 				PRODUCT_NAME = M365Hub;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -215,7 +219,7 @@
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.28;
 				PRODUCT_BUNDLE_IDENTIFIER = net.de5.m365hub;
 				PRODUCT_NAME = M365Hub;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;

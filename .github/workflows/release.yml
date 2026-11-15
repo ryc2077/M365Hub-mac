@@ -10,9 +10,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release, e.g. 1.0.13"
+        description: "Version to release, e.g. 1.0.28"
         required: true
-        default: "1.0.13"
+        default: "1.0.28"
       run_id:
         description: "Build run id to take the app from (empty = latest successful build run)"
         required: false

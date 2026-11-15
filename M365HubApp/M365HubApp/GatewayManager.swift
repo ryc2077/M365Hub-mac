@@ -7,12 +7,28 @@ import AppKit
 // exactly "m365hub" is cleared so the bundled binary can start;
 // otherwise the bundled binary is spawned and only that self-spawned
 // process is stopped on quit.
+//
+// 1.0.28: `ready` is no longer set on failure paths. A dead gateway
+// used to land the user on a login screen that could never log in
+// ("The request timed out."). Now a failed start enters `failure`
+// instead, and the app shows a failure screen with the real cause,
+// the log tail, and a retry button. A login that times out heals the
+// same way (see healAfterLoginTimeout): the hung occupant is cleared
+// only if it is named exactly "m365hub", the bundled gateway is
+// restarted, and the login is retried once automatically.
 final class GatewayManager: ObservableObject {
     static let shared = GatewayManager()
 
     @Published var ready = false
+    @Published var failure: GatewayFailure?
+    @Published var recovering = false
     private var process: Process?
     private(set) var owned = false
+
+    enum HealOutcome {
+        case loggedIn(mustChange: Bool)
+        case failed(String)
+    }
 
     private var dataDir: URL {
         let dir = FileManager.default.homeDirectoryForCurrentUser
@@ -21,7 +37,17 @@ final class GatewayManager: ObservableObject {
         return dir
     }
 
+    var logFileURL: URL { dataDir.appendingPathComponent("serve-mac.log") }
+    private var stateFileURL: URL { dataDir.appendingPathComponent("gateway-state.json") }
+
     func start() {
+        // A retry starts clean: drop the old failure (and its state
+        // file) so a healed launch does not keep showing the old
+        // failure screen.
+        failure = nil
+        ready = false
+        recovering = false
+        GatewayDiagnostics.clearState(at: stateFileURL)
         // Probe with a short timeout first. API.session defaults to a
         // 120s timeout, so a gateway that accepts the connection but
         // never answers (hung old gateway) left the app on the
@@ -65,19 +91,40 @@ final class GatewayManager: ObservableObject {
         }.resume()
     }
 
+    private func currentLogTail() -> String {
+        GatewayDiagnostics.logTail(url: logFileURL)
+    }
+
+    private func appendNote(_ line: String) {
+        GatewayDiagnostics.appendNote(line, to: logFileURL)
+    }
+
+    // Enter the failure state: the app shows the failure screen
+    // instead of the login screen, and the diagnosis is written to
+    // gateway-state.json so it survives the app and CI can read it.
+    // Always called on the main queue (it publishes).
+    private func enterFailure(_ value: GatewayFailure) {
+        failure = value
+        recovering = false
+        GatewayDiagnostics.writeState(value, to: stateFileURL)
+        appendNote("网关失败：\(value.title) — \(value.reason)")
+    }
+
     // The hung gateway owns 8230, so a fresh one cannot start. Only kill
     // a process whose name is exactly "m365hub" — never anything else
     // that happens to hold the port. Re-probe afterwards: if the port is
     // free, spawn our own gateway; if it still hangs, something else
-    // owns the port, so surface the login screen (and its real error)
-    // instead of killing blindly.
+    // owns the port, so enter the failure state (with the occupant's
+    // name and pid) instead of killing blindly or showing a dead login
+    // screen.
     private func clearHungGateway() {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let killer = Process()
-            killer.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-            killer.arguments = ["-x", "m365hub"]
-            try? killer.run()
-            killer.waitUntilExit()
+            guard let self else { return }
+            let occupant = GatewayDiagnostics.occupant()
+            if let occ = occupant {
+                self.appendNote("启动探测：8230 占用者 \(occ.name) (pid \(occ.pid))")
+            }
+            GatewayDiagnostics.killProcess(named: "m365hub")
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
                 guard let self else { return }
                 self.probe { outcome in
@@ -90,19 +137,98 @@ final class GatewayManager: ObservableObject {
                     case .nothing:
                         self.spawn()
                     case .hung:
-                        self.ready = true
+                        let stillThere = GatewayDiagnostics.occupant()
+                        self.enterFailure(.portOccupied(occupant: stillThere, logTail: self.currentLogTail()))
                     }
                 }
             }
         }
     }
 
-    private func spawn() {
+    // Called when a login request timed out: the gateway on 8230
+    // accepts TCP but never answers HTTP. Heal it the same way startup
+    // does — identify the occupant (logged), kill it only if it is
+    // named exactly "m365hub", restart the bundled gateway, and retry
+    // the login once automatically. Retrying a second time would just
+    // burn another 10s on the same dead gateway, so a second timeout
+    // enters the failure state instead.
+    func healAfterLoginTimeout(password: String, completion: @escaping (HealOutcome) -> Void) {
+        recovering = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let occupant = GatewayDiagnostics.occupant()
+            let occDesc = occupant.map { "\($0.name) (pid \($0.pid))" } ?? "查不到占用者"
+            self.appendNote("登录超时，8230 占用者：\(occDesc)")
+            if let occ = occupant, occ.name != "m365hub" {
+                // A foreign process holds the port: we cannot heal it
+                // and must not kill it.
+                let value = GatewayFailure.portOccupied(occupant: occ, logTail: self.currentLogTail())
+                DispatchQueue.main.async {
+                    self.enterFailure(value)
+                    completion(.failed(value.reason))
+                }
+                return
+            }
+            if occupant != nil {
+                GatewayDiagnostics.killProcess(named: "m365hub")
+                Thread.sleep(forTimeInterval: 1)
+            }
+            DispatchQueue.main.async {
+                self.probe { outcome in
+                    switch outcome {
+                    case .answering:
+                        self.retryLogin(password: password, occupant: occupant, completion: completion)
+                    case .nothing:
+                        self.spawn { ok in
+                            if ok {
+                                self.retryLogin(password: password, occupant: occupant, completion: completion)
+                            } else {
+                                // spawn() already entered the failure state.
+                                completion(.failed(self.failure?.reason ?? "网关启动失败"))
+                            }
+                        }
+                    case .hung:
+                        let stillThere = GatewayDiagnostics.occupant()
+                        let value = GatewayFailure.portOccupied(occupant: stillThere, logTail: self.currentLogTail())
+                        self.enterFailure(value)
+                        completion(.failed(value.reason))
+                    }
+                }
+            }
+        }
+    }
+
+    // The single automatic re-login after a heal. On success the
+    // caller logs the user in; on a second timeout the failure state
+    // is entered (the gateway is still dead); any other error (e.g.
+    // wrong password) is reported as-is without entering failure.
+    private func retryLogin(password: String, occupant: PortOccupant?,
+                            completion: @escaping (HealOutcome) -> Void) {
+        API.login(password: password) { [weak self] r in
+            guard let self else { return }
+            self.recovering = false
+            switch r {
+            case .success(let mc):
+                completion(.loggedIn(mustChange: mc))
+            case .failure(let e):
+                if (e as? URLError)?.code == .timedOut {
+                    let value = GatewayFailure.loginStillTimingOut(occupant: occupant, logTail: self.currentLogTail())
+                    self.enterFailure(value)
+                    completion(.failed(value.reason))
+                } else {
+                    completion(.failed(e.localizedDescription))
+                }
+            }
+        }
+    }
+
+    private func spawn(completion: ((Bool) -> Void)? = nil) {
         guard let bin = Bundle.main.path(forResource: "m365hub", ofType: nil) else {
-            // No bundled binary (e.g. first Xcode run before build-gateway.sh):
-            // mark ready anyway so the login screen can show the real error
-            // from the API instead of hanging on a spinner.
-            ready = true
+            // No bundled binary (e.g. first Xcode run before the
+            // Resources binary is in place): fail loudly instead of
+            // showing a login screen that can never work.
+            enterFailure(.noBundledBinary())
+            completion?(false)
             return
         }
         let p = Process()
@@ -112,7 +238,7 @@ final class GatewayManager: ObservableObject {
         env["M365_DATA_DIR"] = dataDir.path
         env["M365_LISTEN"] = "127.0.0.1:8230"
         p.environment = env
-        let log = dataDir.appendingPathComponent("serve-mac.log")
+        let log = logFileURL
         if !FileManager.default.fileExists(atPath: log.path) {
             FileManager.default.createFile(atPath: log.path, contents: nil)
         }
@@ -128,19 +254,22 @@ final class GatewayManager: ObservableObject {
             process = p
             owned = true
         } catch {
-            ready = true
+            enterFailure(.spawnFailed(error, logTail: currentLogTail()))
+            completion?(false)
             return
         }
         // Poll until the gateway answers.
-        poll(attempt: 0)
+        poll(attempt: 0, completion: completion)
     }
 
-    private func poll(attempt: Int) {
+    private func poll(attempt: Int, completion: ((Bool) -> Void)? = nil) {
         // If our spawned gateway already exited, polling for 30s is
-        // pointless: surface the login screen (and its real error)
-        // immediately instead of another half-minute spinner.
+        // pointless: enter the failure state (with the log tail)
+        // immediately instead of another half-minute spinner followed
+        // by a dead login screen.
         if let p = process, !p.isRunning {
-            ready = true
+            enterFailure(.exitedEarly(logTail: currentLogTail()))
+            completion?(false)
             return
         }
         // A raw probe: only an actual HTTP response means the gateway is
@@ -151,12 +280,14 @@ final class GatewayManager: ObservableObject {
             DispatchQueue.main.async {
                 if resp != nil {
                     self?.ready = true
+                    completion?(true)
                 } else if attempt < 30 {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-                        self?.poll(attempt: attempt + 1)
+                        self?.poll(attempt: attempt + 1, completion: completion)
                     }
                 } else {
-                    self?.ready = true
+                    self?.enterFailure(.noAnswer(logTail: self?.currentLogTail() ?? ""))
+                    completion?(false)
                 }
             }
         }.resume()

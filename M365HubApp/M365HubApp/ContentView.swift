@@ -11,12 +11,24 @@ struct M365HubApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if gateway.ready {
+                if let failure = gateway.failure {
+                    // 1.0.28: the gateway failed to start (or a login
+                    // timed out twice). Show the failure screen with the
+                    // real cause and the log tail instead of a login
+                    // screen that can never log in.
+                    GatewayFailureView(failure: failure, logURL: gateway.logFileURL) {
+                        gateway.start()
+                    }
+                    .preferredColorScheme(dark ? .dark : .light)
+                } else if gateway.ready {
                     ContentView(store: store)
                         .preferredColorScheme(dark ? .dark : .light)
                 } else {
-                    VStack { ProgressView(); Text("正在启动本地网关…") }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    VStack {
+                        ProgressView()
+                        Text(gateway.recovering ? "正在恢复本地网关…" : "正在启动本地网关…")
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             // Startup lives here, not in ContentView.onAppear: ContentView
@@ -62,6 +74,8 @@ struct ContentView: View {
     @State private var password = ""
     @State private var error = ""
     @State private var loggingIn = false
+    @State private var healing = false
+    @State private var healedOnce = false
     @State private var columnVisibility = NavigationSplitViewVisibility.all
 
     var body: some View {
@@ -69,18 +83,45 @@ struct ContentView: View {
             if loggedIn == true {
                 mainView
             } else {
-                LoginView(mustChange: $mustChange, password: $password, error: $error, loggingIn: $loggingIn) {
+                LoginView(mustChange: $mustChange, password: $password, error: $error, loggingIn: $loggingIn, healing: $healing) {
                     guard !loggingIn else { return }
                     loggingIn = true
                     error = ""
                     API.login(password: password) { r in
-                        loggingIn = false
                         switch r {
                         case .success(let mc):
+                            loggingIn = false
                             if mc { mustChange = true }
                             else { loggedIn = true; password = "" }
                         case .failure(let e):
-                            error = e.localizedDescription
+                            // 1.0.28: a login that times out means the
+                            // gateway on 8230 accepts TCP but never
+                            // answers — the hung gateway the user hit in
+                            // 1.0.27. Heal it once (clear a hung m365hub,
+                            // restart the bundled gateway, retry the
+                            // login automatically) instead of leaving a
+                            // bare "The request timed out." on the
+                            // screen. A second timeout is a real
+                            // failure, not a retry loop.
+                            if (e as? URLError)?.code == .timedOut, !healedOnce {
+                                healedOnce = true
+                                healing = true
+                                error = ""
+                                GatewayManager.shared.healAfterLoginTimeout(password: password) { outcome in
+                                    healing = false
+                                    loggingIn = false
+                                    switch outcome {
+                                    case .loggedIn(let mc):
+                                        if mc { mustChange = true }
+                                        else { loggedIn = true; password = "" }
+                                    case .failed(let msg):
+                                        error = msg
+                                    }
+                                }
+                            } else {
+                                loggingIn = false
+                                error = e.localizedDescription
+                            }
                         }
                     }
                 }
@@ -166,6 +207,7 @@ struct LoginView: View {
     @Binding var password: String
     @Binding var error: String
     @Binding var loggingIn: Bool
+    @Binding var healing: Bool
     var onLogin: () -> Void
     @State private var current = ""
     @State private var next = ""
@@ -186,13 +228,64 @@ struct LoginView: View {
             } else {
                 SecureField("管理员密码", text: $password)
                     .onSubmit(onLogin)
-                    .disabled(loggingIn)
-                Button(loggingIn ? "正在登录…" : "登录", action: onLogin)
-                    .disabled(loggingIn)
+                    .disabled(loggingIn || healing)
+                Button(healing ? "正在恢复本地网关…" : (loggingIn ? "正在登录…" : "登录"), action: onLogin)
+                    .disabled(loggingIn || healing)
+                if healing {
+                    Text("登录超时，正在清理卡死的网关并自动重登，请稍等…")
+                        .foregroundStyle(.secondary)
+                        .font(.callout)
+                }
             }
             if !error.isEmpty { Text(error).foregroundStyle(.red) }
         }
         .padding(40)
         .frame(maxWidth: 420)
+    }
+}
+
+// 1.0.28: shown instead of the login screen when the gateway could
+// not be started (or a login timed out twice). Everything on it is
+// written so a screenshot sent back to the developer is enough to
+// locate the cause: the real reason, the port occupant, and the
+// gateway log tail.
+struct GatewayFailureView: View {
+    let failure: GatewayFailure
+    let logURL: URL
+    var onRetry: () -> Void
+    @State private var copied = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("本地网关起不来").font(.largeTitle)
+                Text(failure.title).font(.headline)
+                Text(failure.reason)
+                Text("网关日志末尾（serve-mac.log）：").font(.headline)
+                Text(failure.logTail.isEmpty ? "（暂无日志）" : failure.logTail)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color.gray.opacity(0.12))
+                    .cornerRadius(8)
+                HStack(spacing: 12) {
+                    Button("重试", action: onRetry)
+                    Button("查看完整日志") {
+                        NSWorkspace.shared.activateFileViewerSelecting([logURL])
+                    }
+                    Button(copied ? "已复制" : "复制诊断信息") {
+                        NSPasteboard.general.clearContents()
+                        _ = NSPasteboard.general.setString(failure.diagnosticText, forType: .string)
+                        copied = true
+                    }
+                }
+                Text("把这屏截图发给开发者，就能定位问题。")
+                    .foregroundStyle(.secondary)
+            }
+            .padding(40)
+            .frame(maxWidth: 640)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
