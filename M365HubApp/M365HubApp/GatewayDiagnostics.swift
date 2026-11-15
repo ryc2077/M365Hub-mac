@@ -31,11 +31,11 @@ self.createdAt = Date()
 }
 
 var diagnosticText: String {
-var parts = ["", title, reason]
+var parts = ["M365Hub 本地网关故障", title, reason]
 if let name = occupantName, let pid = occupantPid {
 parts.append("占用者：\(name)（pid \(pid)）")
 }
-if!logTail.isEmpty {
+if logTail.isEmpty == false {
 parts.append("网关日志末尾：\n\(logTail)")
 }
 return parts.joined(separator: "\n\n")
@@ -116,7 +116,7 @@ static func parseLsofFieldOutput(_ text: String) -> PortOccupant? {
 var pid: Int32?
 var command: String?
 func flush() -> PortOccupant? {
-guard let p = pid, let c = command,!c.isEmpty else { return nil}
+guard let p = pid, let c = command, c.isEmpty == false else { return nil}
 return PortOccupant(name: c, pid: p)
 }
 for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
@@ -152,7 +152,7 @@ return nil
 }
 p.waitUntilExit()
 let data = pipe.fileHandleForReading.readDataToEndOfFile()
-guard let text = String(data: data, encoding:.utf8),!text.isEmpty else { return nil}
+guard let text = String(data: data, encoding:.utf8), text.isEmpty == false else { return nil}
 return parseLsofFieldOutput(text)
 }
 
@@ -173,7 +173,7 @@ p.waitUntilExit()
 // Last `maxLines` lines of a log file, reading at most `maxBytes`
 // from the end so a huge log cannot blow up the failure screen.
 static func logTail(url: URL, maxLines: Int = 40, maxBytes: Int = 16384) -> String {
-guard let data = try? Data(contentsOf: url),!data.isEmpty else { return ""}
+guard let data = try? Data(contentsOf: url), data.isEmpty == false else { return ""}
 let tail = data.suffix(maxBytes)
 let text = String(decoding: tail, as: UTF8.self)
 let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
@@ -183,7 +183,7 @@ return lines.suffix(maxLines).joined(separator: "\n")
 // Append one "[app]..." line to serve-mac.log, so the occupant the
 // app saw is in the same log the failure screen shows.
 static func appendNote(_ line: String, to logURL: URL) {
-if!FileManager.default.fileExists(atPath: logURL.path) {
+if FileManager.default.fileExists(atPath: logURL.path) == false {
 FileManager.default.createFile(atPath: logURL.path, contents: nil)
 }
 guard let h = try? FileHandle(forWritingTo: logURL) else { return}
