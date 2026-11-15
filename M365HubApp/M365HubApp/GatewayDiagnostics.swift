@@ -54,7 +54,7 @@ return parts.joined(separator: "\n\n")
 
 static func portOccupied(occupant: PortOccupant?, logTail: String) -> GatewayFailure {
 if let occ = occupant {
-let sameUser = occ.uid == nil || occ.uid == currentUID()
+let sameUser = occ.uid == nil || occ.uid == GatewayDiagnostics.currentUID()
 if occ.name == "m365hub", sameUser {
 // 1.0.29: the occupant IS our gateway and the app already tried a
 // normal end (SIGTERM) on it — it did not react. Say so plainly
@@ -81,7 +81,7 @@ occupantName: occ.name, occupantPid: occ.pid, occupantUID: occ.uid)
 var reason = "端口 8230 被「\(occ.name)」（pid \(occ.pid)）占着：它只接受连接、从不回话。"
 + "应用只敢清理自己名字的网关进程，不敢乱杀别的进程，所以没法自己恢复。"
 + "请退出那个进程（或重启电脑），再重新打开应用。"
-if let uid = occ.uid, uid != currentUID() {
+if let uid = occ.uid, uid != GatewayDiagnostics.currentUID() {
 reason += "（该进程属于其他用户。）"
 }
 return GatewayFailure(
@@ -291,7 +291,7 @@ return false
 note("正常结束 \(occupant.name) (pid \(occupant.pid))")
 kill(pid: occupant.pid)
 Thread.sleep(forTimeInterval: 2)
-guard let still = occupant() else {
+guard let still = GatewayDiagnostics.occupant() else {
 note("端口 8230 已空出")
 return true
 }
@@ -302,7 +302,7 @@ return false
 note("正常结束没反应，强制结束 pid \(occupant.pid)")
 kill(pid: occupant.pid, signal: 9)
 Thread.sleep(forTimeInterval: 1)
-if occupant() == nil {
+if GatewayDiagnostics.occupant() == nil {
 note("端口 8230 已空出")
 return true
 }
