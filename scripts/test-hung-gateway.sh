@@ -150,9 +150,15 @@ done
 if [ "$FOUND" = "1" ]; then
   pass "app entered the failure state (gateway-state.json written)"
   cp "$STATE" "$STATE_COPY"
-  grep -q "python3" "$STATE" \
-    && pass "state file names the occupant (python3)" \
-    || fail "state file does not name python3: $(cat "$STATE")"
+  # The occupant name is whatever lsof reports for the listener
+  # (macOS reports the Python interpreter as "Python", not the
+  # "python3" command used to start it), so read the name from lsof
+  # instead of assuming it.
+  OCC_NAME=$(lsof -nP -iTCP:8230 -sTCP:LISTEN -Fcpn 2>/dev/null | awk '/^c/{print substr($0,2); exit}')
+  [ -n "$OCC_NAME" ] || OCC_NAME="python3"
+  grep -q "$OCC_NAME" "$STATE" \
+    && pass "state file names the occupant ($OCC_NAME)" \
+    || fail "state file does not name $OCC_NAME: $(cat "$STATE")"
   grep -q "$PY_PID" "$STATE" \
     && pass "state file names the occupant pid ($PY_PID)" \
     || fail "state file does not name pid $PY_PID: $(cat "$STATE")"
