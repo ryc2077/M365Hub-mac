@@ -16,11 +16,11 @@ struct M365HubApp: App {
                     // timed out twice). Show the failure screen with the
                     // real cause and the log tail instead of a login
                     // screen that can never log in.
-                    GatewayFailureView(failure: failure, logURL: gateway.logFileURL, onForceClean: {
-                        gateway.forceCleanAndRetry()
-                    }) {
+                    GatewayFailureView(failure: failure, logURL: gateway.logFileURL, onRetry: {
                         gateway.start()
-                    }
+                    }, onForceClean: {
+                        gateway.forceCleanAndRetry()
+                    })
                     .preferredColorScheme(dark ? .dark : .light)
                 } else if gateway.ready {
                     ContentView(store: store)
