@@ -16,7 +16,9 @@ struct M365HubApp: App {
                     // timed out twice). Show the failure screen with the
                     // real cause and the log tail instead of a login
                     // screen that can never log in.
-                    GatewayFailureView(failure: failure, logURL: gateway.logFileURL) {
+                    GatewayFailureView(failure: failure, logURL: gateway.logFileURL, onForceClean: {
+                        gateway.forceCleanAndRetry()
+                    }) {
                         gateway.start()
                     }
                     .preferredColorScheme(dark ? .dark : .light)
@@ -249,11 +251,26 @@ struct LoginView: View {
 // written so a screenshot sent back to the developer is enough to
 // locate the cause: the real reason, the port occupant, and the
 // gateway log tail.
+// 1.0.29: adds a "强制清理并重试" button for a confirmed same-user
+// m365hub occupant — one tap re-runs the SIGKILL escalation and
+// restarts the gateway. A foreign process (or another user's) never
+// gets the button: the app must not kill what it does not own.
 struct GatewayFailureView: View {
     let failure: GatewayFailure
     let logURL: URL
     var onRetry: () -> Void
+    var onForceClean: () -> Void = {}
     @State private var copied = false
+    @State private var forceTapped = false
+
+    // Only a same-user m365hub occupant can be force-cleaned. uid nil
+    // means ps could not tell; the escalation itself re-checks the
+    // occupant before signalling, so showing the button is safe.
+    private var canForceClean: Bool {
+        guard failure.occupantName == "m365hub" else { return false }
+        guard let uid = failure.occupantUID else { return true }
+        return uid == GatewayDiagnostics.currentUID()
+    }
 
     var body: some View {
         ScrollView {
@@ -271,6 +288,13 @@ struct GatewayFailureView: View {
                     .cornerRadius(8)
                 HStack(spacing: 12) {
                     Button("重试", action: onRetry)
+                    if canForceClean {
+                        Button(forceTapped ? "正在强制清理…" : "强制清理并重试") {
+                            forceTapped = true
+                            onForceClean()
+                        }
+                        .disabled(forceTapped)
+                    }
                     Button("查看完整日志") {
                         NSWorkspace.shared.activateFileViewerSelecting([logURL])
                     }

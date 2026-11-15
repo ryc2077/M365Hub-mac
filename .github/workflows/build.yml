@@ -59,10 +59,13 @@ jobs:
         continue-on-error: true
         run: bash scripts/test-applaunch.sh build/Build/Products/Debug/M365Hub.app
 
-      # Hung-gateway self-heal test (1.0.28): a hung process named
-      # exactly "m365hub" holding 8230 must be cleared by the app and
-      # its own gateway must answer; a hung foreign process must not
-      # be killed and must produce the failure state naming it. Runs
+      # Hung-gateway self-heal test (1.0.28, extended 1.0.29): a hung
+      # process named exactly "m365hub" holding 8230 must be cleared
+      # by the app and its own gateway must answer; a hung foreign
+      # process must not be killed and must produce the failure state
+      # naming it. 1.0.29 adds Phase C (a "m365hub" that ignores
+      # SIGTERM must be escalated to SIGKILL by pid) and Phase C2 (a
+      # TERM-ignoring foreign listener must never be killed). Runs
       # here, before the account test, so the data dir it wipes is
       # still fresh and the account test starts clean.
       - name: Hung-gateway self-heal test
@@ -203,6 +206,9 @@ jobs:
           cp "${RUNNER_TEMP}/m365hub-hung-gateway-shot.png" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-hung-gateway-fail-shot.png" test-evidence/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/m365hub-hung-gateway-state.json" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-hung-gateway-shot-c.png" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-hung-gateway-fail-shot-c2.png" test-evidence/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/m365hub-hung-gateway-state-c2.json" test-evidence/ 2>/dev/null || true
           ls -la test-evidence/
 
       - name: Upload built app

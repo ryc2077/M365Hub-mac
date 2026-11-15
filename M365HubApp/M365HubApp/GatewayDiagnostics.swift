@@ -7,6 +7,9 @@ import Foundation
 struct PortOccupant: Codable, Equatable {
 let name: String
 let pid: Int32
+// Owner uid, filled by occupant() via ps. nil when ps could not tell
+// (caller then treats the occupant as same-user, best effort).
+var uid: Int32? = nil
 }
 
 // What the failure screen shows, and what is written to
@@ -18,22 +21,28 @@ let reason: String
 let logTail: String
 let occupantName: String?
 let occupantPid: Int32?
+let occupantUID: Int32?
 let createdAt: Date
 
 init(title: String, reason: String, logTail: String,
-occupantName: String? = nil, occupantPid: Int32? = nil) {
+occupantName: String? = nil, occupantPid: Int32? = nil, occupantUID: Int32? = nil) {
 self.title = title
 self.reason = reason
 self.logTail = logTail
 self.occupantName = occupantName
 self.occupantPid = occupantPid
+self.occupantUID = occupantUID
 self.createdAt = Date()
 }
 
 var diagnosticText: String {
 var parts = ["M365Hub 本地网关故障", title, reason]
 if let name = occupantName, let pid = occupantPid {
-parts.append("占用者：\(name)（pid \(pid)）")
+var line = "占用者：\(name)（pid \(pid)）"
+if let uid = occupantUID {
+line += "（uid \(uid)）"
+}
+parts.append(line)
 }
 if logTail.isEmpty == false {
 parts.append("网关日志末尾：\n\(logTail)")
@@ -45,18 +54,46 @@ return parts.joined(separator: "\n\n")
 
 static func portOccupied(occupant: PortOccupant?, logTail: String) -> GatewayFailure {
 if let occ = occupant {
+let sameUser = occ.uid == nil || occ.uid == currentUID()
+if occ.name == "m365hub", sameUser {
+// 1.0.29: the occupant IS our gateway and the app already tried a
+// normal end (SIGTERM) on it — it did not react. Say so plainly
+// instead of the old "only dares to clear its own name" line, which
+// was wrong exactly here: the name matched, the signal did not work.
 return GatewayFailure(
 title: "端口 8230 被占着，网关起不来",
-reason: "端口 8230 被「\(occ.name)」（pid \(occ.pid)）占着：它只接受连接、从不回话。"
-+ "应用只敢清理自己名字的网关进程，不敢乱杀别的进程，所以没法自己恢复。"
-+ "请退出那个进程（或重启电脑），再重新打开应用。",
+reason: "端口 8230 被「m365hub」（pid \(occ.pid)）占着：它只接受连接、从不回话。"
++ "应用已试过正常结束，它没反应。点「强制清理并重试」会强制结束它并重起网关；"
++ "如果还是不行，请重启电脑。",
 logTail: logTail,
-occupantName: occ.name, occupantPid: occ.pid)
+occupantName: occ.name, occupantPid: occ.pid, occupantUID: occ.uid)
+}
+if occ.name == "m365hub" {
+// Same name, but another user's process (e.g. root): the app
+// cannot end it, so do not offer a force-clean that cannot work.
+return GatewayFailure(
+title: "端口 8230 被占着，网关起不来",
+reason: "端口 8230 被「m365hub」（pid \(occ.pid)）占着：它只接受连接、从不回话。"
++ "该进程属于其他用户，应用无权结束它。请重启电脑后再重新打开应用。",
+logTail: logTail,
+occupantName: occ.name, occupantPid: occ.pid, occupantUID: occ.uid)
+}
+var reason = "端口 8230 被「\(occ.name)」（pid \(occ.pid)）占着：它只接受连接、从不回话。"
++ "应用只敢清理自己名字的网关进程，不敢乱杀别的进程，所以没法自己恢复。"
++ "请退出那个进程（或重启电脑），再重新打开应用。"
+if let uid = occ.uid, uid != currentUID() {
+reason += "（该进程属于其他用户。）"
+}
+return GatewayFailure(
+title: "端口 8230 被占着，网关起不来",
+reason: reason,
+logTail: logTail,
+occupantName: occ.name, occupantPid: occ.pid, occupantUID: occ.uid)
 }
 return GatewayFailure(
 title: "端口 8230 被占着，网关起不来",
 reason: "端口 8230 被别的进程占着（它只接受连接、从不回话），但查不到是哪个进程。"
-+ "应用只敢清理自己名字的网关进程。请重启电脑后再重新打开应用。",
++ "请重启电脑后再重新打开应用。",
 logTail: logTail)
 }
 
@@ -64,7 +101,7 @@ static func noBundledBinary() -> GatewayFailure {
 GatewayFailure(
 title: "应用包里没有自带网关",
 reason: "M365Hub.app 里找不到 Resources/m365hub，自带网关没打进包。"
-+ "请重新下载 1.0.28 的完整安装包（不要只拷应用本体）。",
++ "请重新下载 1.0.29 的完整安装包（不要只拷应用本体）。",
 logTail: "")
 }
 
@@ -99,7 +136,7 @@ return GatewayFailure(
 title: "登录连续两次超时",
 reason: reason,
 logTail: logTail,
-occupantName: occupant?.name, occupantPid: occupant?.pid)
+occupantName: occupant?.name, occupantPid: occupant?.pid, occupantUID: occupant?.uid)
 }
 }
 
@@ -137,7 +174,10 @@ return flush()
 }
 
 // Who listens on 8230 right now, if anyone. Runs /usr/sbin/lsof;
-// nil means nothing is listening (or lsof could not run).
+// nil means nothing is listening (or lsof could not run). The
+// occupant's uid is filled in via ps so the caller can tell a
+// same-user m365hub (which the app may end) from another user's
+// process (which it cannot).
 static func occupant() -> PortOccupant? {
 let p = Process()
 p.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
@@ -153,11 +193,61 @@ return nil
 p.waitUntilExit()
 let data = pipe.fileHandleForReading.readDataToEndOfFile()
 guard let text = String(data: data, encoding:.utf8), text.isEmpty == false else { return nil}
-return parseLsofFieldOutput(text)
+guard var occ = parseLsofFieldOutput(text) else { return nil }
+occ.uid = occupantUID(pid: occ.pid)
+return occ
+}
+
+// This app's uid, for comparing against an occupant's uid. Via
+// /usr/bin/id so the file stays Foundation-only (no raw Darwin call).
+// -1 on failure: it never matches a real uid, so a failure here
+// fails safe (never kill) instead of guessing.
+static func currentUID() -> Int32 {
+let p = Process()
+p.executableURL = URL(fileURLWithPath: "/usr/bin/id")
+p.arguments = ["-u"]
+let pipe = Pipe()
+p.standardOutput = pipe
+p.standardError = FileHandle.nullDevice
+do {
+try p.run()
+} catch {
+return -1
+}
+p.waitUntilExit()
+let data = pipe.fileHandleForReading.readDataToEndOfFile()
+guard let text = String(data: data, encoding: .utf8),
+let uid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+return -1
+}
+return uid
+}
+
+// Owner uid of a pid, via ps. nil when ps cannot tell (bad pid, or
+// ps itself failed) — the caller then treats the occupant as
+// same-user, best effort.
+static func occupantUID(pid: Int32) -> Int32? {
+let p = Process()
+p.executableURL = URL(fileURLWithPath: "/bin/ps")
+p.arguments = ["-o", "uid=", "-p", String(pid)]
+let pipe = Pipe()
+p.standardOutput = pipe
+p.standardError = FileHandle.nullDevice
+do {
+try p.run()
+} catch {
+return nil
+}
+p.waitUntilExit()
+let data = pipe.fileHandleForReading.readDataToEndOfFile()
+guard let text = String(data: data, encoding:.utf8) else { return nil }
+return Int32(text.trimmingCharacters(in: .whitespacesAndNewlines))
 }
 
 // Kill only a process whose name is exactly `name`. Never anything
-// else that happens to hold the port.
+// else that happens to hold the port. TERM only — used when the
+// occupant is unknown (lsof failed) and there is no pid to escalate
+// against; the known-occupant path below is killEscalating.
 static func killProcess(named name: String) {
 let p = Process()
 p.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
@@ -166,6 +256,58 @@ p.standardOutput = FileHandle.nullDevice
 p.standardError = FileHandle.nullDevice
 try? p.run()
 p.waitUntilExit()
+}
+
+// Signal one pid. Used for both steps of the escalation so no
+// name-based sweep is ever involved.
+static func kill(pid: Int32, signal: Int32 = 15) {
+let p = Process()
+p.executableURL = URL(fileURLWithPath: "/bin/kill")
+p.arguments = ["-\(signal)", String(pid)]
+p.standardOutput = FileHandle.nullDevice
+p.standardError = FileHandle.nullDevice
+try? p.run()
+p.waitUntilExit()
+}
+
+// Escalating kill of a known port occupant (1.0.29). 1.0.28 sent one
+// SIGTERM and gave up; a gateway that ignores SIGTERM (e.g. stopped
+// in a terminal with Ctrl-Z, or started by another user) survived
+// it and the app landed on the failure screen. Now: SIGTERM the pid,
+// wait 2s, re-check by pid whether that same pid still holds the
+// port; if it does, SIGKILL that pid and wait 1s. Every step is
+// reported through `note` so serve-mac.log shows what was tried.
+// Returns true when the port ends up free. The caller must already
+// have confirmed the occupant is named exactly "m365hub"; this
+// function only ever signals the pid it was given, after re-checking
+// that pid still holds the port — never a name sweep. An occupant
+// owned by another user is never signalled (the app could not end it
+// anyway) and returns false.
+static func killEscalating(occupant: PortOccupant, note: (String) -> Void) -> Bool {
+if let uid = occupant.uid, uid != currentUID() {
+note("占用者 \(occupant.name) (pid \(occupant.pid)) 属于其他用户，应用无权结束它")
+return false
+}
+note("正常结束 \(occupant.name) (pid \(occupant.pid))")
+kill(pid: occupant.pid)
+Thread.sleep(forTimeInterval: 2)
+guard let still = occupant() else {
+note("端口 8230 已空出")
+return true
+}
+if still.pid != occupant.pid {
+note("端口 8230 现被 \(still.name) (pid \(still.pid)) 占着，不再是原来的进程，不再清理")
+return false
+}
+note("正常结束没反应，强制结束 pid \(occupant.pid)")
+kill(pid: occupant.pid, signal: 9)
+Thread.sleep(forTimeInterval: 1)
+if occupant() == nil {
+note("端口 8230 已空出")
+return true
+}
+note("强制结束也没能清掉 pid \(occupant.pid)")
+return false
 }
 
 // MARK: - Log tail

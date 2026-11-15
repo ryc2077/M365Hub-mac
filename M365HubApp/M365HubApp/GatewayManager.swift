@@ -16,6 +16,17 @@ import AppKit
 // same way (see healAfterLoginTimeout): the hung occupant is cleared
 // only if it is named exactly "m365hub", the bundled gateway is
 // restarted, and the login is retried once automatically.
+//
+// 1.0.29: the kill escalates. 1.0.28 sent one SIGTERM and gave up; a
+// gateway that ignores SIGTERM (e.g. stopped in a terminal) survived
+// it, and the failure screen named a m365hub occupant the app had
+// supposedly cleared. Both cleanup points now run killEscalating
+// (SIGTERM, wait 2s, SIGKILL by pid if the same pid still holds the
+// port, every step logged). The occupant's uid is recorded, so a
+// foreign-user process gets an honest "no permission" copy instead
+// of the misleading "only dares to clear its own name" line. The
+// failure screen also offers forceCleanAndRetry: one tap re-runs the
+// escalation against a confirmed same-user m365hub occupant.
 final class GatewayManager: ObservableObject {
     static let shared = GatewayManager()
 
@@ -123,8 +134,19 @@ final class GatewayManager: ObservableObject {
             let occupant = GatewayDiagnostics.occupant()
             if let occ = occupant {
                 self.appendNote("启动探测：8230 占用者 \(occ.name) (pid \(occ.pid))")
+                if occ.name == "m365hub" {
+                    // 1.0.29: escalating kill (TERM, then SIGKILL by pid
+                    // if the same pid still holds the port). A
+                    // TERM-ignoring gateway survived 1.0.28's single
+                    // SIGTERM, which is exactly the failure the user hit.
+                    _ = GatewayDiagnostics.killEscalating(occupant: occ, note: { self.appendNote($0) })
+                }
+            } else {
+                // Occupant unknown (lsof failed): fall back to the old
+                // TERM-by-name, which only ever touches m365hub
+                // processes. There is no pid to escalate against.
+                GatewayDiagnostics.killProcess(named: "m365hub")
             }
-            GatewayDiagnostics.killProcess(named: "m365hub")
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
                 guard let self else { return }
                 self.probe { outcome in
@@ -169,9 +191,12 @@ final class GatewayManager: ObservableObject {
                 }
                 return
             }
-            if occupant != nil {
-                GatewayDiagnostics.killProcess(named: "m365hub")
-                Thread.sleep(forTimeInterval: 1)
+            if let occ = occupant {
+                // 1.0.29: escalating kill (TERM, then SIGKILL by pid if
+                // the same pid still holds the port). A foreign-user
+                // occupant is never signalled; killEscalating returns
+                // false and logs why.
+                _ = GatewayDiagnostics.killEscalating(occupant: occ, note: { self.appendNote($0) })
             }
             DispatchQueue.main.async {
                 self.probe { outcome in
@@ -193,6 +218,41 @@ final class GatewayManager: ObservableObject {
                         self.enterFailure(value)
                         completion(.failed(value.reason))
                     }
+                }
+            }
+        }
+    }
+
+    // 1.0.29: the failure screen's "强制清理并重试" button. Re-runs
+    // the escalation against the occupant the failure screen named,
+    // but only after re-confirming (via lsof) that the same pid with
+    // the name m365hub still holds the port — never a stale pid, never
+    // a foreign process. If the port comes free, restart normally
+    // (start() re-probes and spawns); if not, back to the failure
+    // screen with the fresh reason.
+    func forceCleanAndRetry() {
+        guard let f = failure, let name = f.occupantName, name == "m365hub",
+              let pid = f.occupantPid else { return }
+        failure = nil
+        recovering = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let current = GatewayDiagnostics.occupant()
+            guard let occ = current, occ.pid == pid, occ.name == "m365hub" else {
+                // Occupant changed or the port freed on its own: just
+                // restart normally instead of killing a stale pid.
+                self.appendNote("强制清理：8230 占用者已变或端口已空出，直接重起")
+                DispatchQueue.main.async { self.start() }
+                return
+            }
+            self.appendNote("强制清理：8230 占用者 \(occ.name) (pid \(occ.pid))")
+            let freed = GatewayDiagnostics.killEscalating(occupant: occ, note: { self.appendNote($0) })
+            DispatchQueue.main.async {
+                if freed {
+                    self.start()
+                } else {
+                    let still = GatewayDiagnostics.occupant()
+                    self.enterFailure(.portOccupied(occupant: still, logTail: self.currentLogTail()))
                 }
             }
         }

@@ -91,6 +91,139 @@ struct GatewayDiagnosticsTests {
         let unknown = GatewayFailure.portOccupied(occupant: nil, logTail: "")
         check("portOccupied without occupant says so", unknown.reason.contains("查不到"))
 
+
+        // 13. uid helpers: pid 1 (launchd) belongs to root; a bogus pid
+        // has no owner; our own uid matches ps.
+        check("occupantUID(pid 1) is root (0)",
+              GatewayDiagnostics.occupantUID(pid: 1) == 0)
+        check("occupantUID(bogus pid) is nil",
+              GatewayDiagnostics.occupantUID(pid: 999999) == nil)
+        let ownPid = ProcessInfo.processInfo.processIdentifier
+        check("currentUID matches ps for our own pid",
+              GatewayDiagnostics.currentUID() == GatewayDiagnostics.occupantUID(pid: ownPid))
+
+        // Live escalation tests (14-15): a python binder holds 8230.
+        // They need a free port at start; the diagnostics step runs
+        // before anything else binds 8230 in CI.
+        func startBinder(trapTERM: Bool) -> Process? {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+            var code = "import signal, socket, time\n"
+            if trapTERM {
+                code += "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            }
+            code += "s = socket.socket()\n"
+            code += "s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
+            code += "s.bind(('127.0.0.1', 8230))\n"
+            code += "s.listen(16)\n"
+            code += "time.sleep(60)\n"
+            p.arguments = ["-c", code]
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            do {
+                try p.run()
+            } catch {
+                return nil
+            }
+            return p
+        }
+
+        func waitForOccupant(pid: Int32, seconds: Int) -> PortOccupant? {
+            for _ in 0..<seconds {
+                if let occ = GatewayDiagnostics.occupant(), occ.pid == pid {
+                    return occ
+                }
+                Thread.sleep(forTimeInterval: 1)
+            }
+            return nil
+        }
+
+        check("port 8230 is free before the live escalation tests",
+              GatewayDiagnostics.occupant() == nil)
+
+        // 14. A TERM-ignoring occupant is escalated to SIGKILL: the
+        // port comes free and the notes record the forced kill.
+        if let binder = startBinder(trapTERM: true) {
+            let pid = binder.processIdentifier
+            defer {
+                if GatewayDiagnostics.occupantUID(pid: pid) != nil {
+                    GatewayDiagnostics.kill(pid: pid, signal: 9)
+                }
+            }
+            if let occ = waitForOccupant(pid: pid, seconds: 5) {
+                var notes: [String] = []
+                let freed = GatewayDiagnostics.killEscalating(occupant: occ, note: { notes.append($0) })
+                check("escalation frees a TERM-ignoring occupant", freed)
+                check("escalation notes record the forced kill",
+                      notes.contains(where: { $0.contains("强制结束") }))
+                check("TERM-ignoring process is gone after escalation",
+                      GatewayDiagnostics.occupantUID(pid: pid) == nil)
+            } else {
+                check("TERM-ignoring binder came up on 8230", false, "pid \(pid)")
+            }
+        } else {
+            check("TERM-ignoring binder started", false)
+        }
+
+        // 15. A normal occupant dies on SIGTERM alone: the escalation
+        // must not jump to SIGKILL.
+        if let binder = startBinder(trapTERM: false) {
+            let pid = binder.processIdentifier
+            defer {
+                if GatewayDiagnostics.occupantUID(pid: pid) != nil {
+                    GatewayDiagnostics.kill(pid: pid, signal: 9)
+                }
+            }
+            if let occ = waitForOccupant(pid: pid, seconds: 5) {
+                var notes: [String] = []
+                let freed = GatewayDiagnostics.killEscalating(occupant: occ, note: { notes.append($0) })
+                check("escalation frees a normal occupant", freed)
+                check("escalation does not force-kill a normal occupant",
+                      notes.contains(where: { $0.contains("强制结束") }) == false)
+            } else {
+                check("normal binder came up on 8230", false, "pid \(pid)")
+            }
+        } else {
+            check("normal binder started", false)
+        }
+
+        // 16. A foreign-user occupant is never signalled: killEscalating
+        // returns false, notes why, and the process is untouched.
+        let foreignUID: Int32 = GatewayDiagnostics.currentUID() == 0 ? 501 : 0
+        var foreignNotes: [String] = []
+        let foreignFreed = GatewayDiagnostics.killEscalating(
+            occupant: PortOccupant(name: "launchd", pid: 1, uid: foreignUID),
+            note: { foreignNotes.append($0) })
+        check("escalation refuses a foreign-user occupant", foreignFreed == false)
+        check("escalation notes say the occupant belongs to another user",
+              foreignNotes.contains(where: { $0.contains("其他用户") }))
+        check("foreign-user process is untouched (pid 1 still alive)",
+              GatewayDiagnostics.occupantUID(pid: 1) != nil)
+
+        // 17. m365hub + same user: the copy says a normal end was
+        // tried and it did not react, and points at the force clean.
+        let sameUser = GatewayFailure.portOccupied(
+            occupant: PortOccupant(name: "m365hub", pid: 74358, uid: GatewayDiagnostics.currentUID()),
+            logTail: "")
+        check("m365hub same-user copy says a normal end was tried",
+              sameUser.reason.contains("已试过正常结束"))
+        check("m365hub same-user copy offers the force clean",
+              sameUser.reason.contains("强制清理并重试"))
+
+        // 18. m365hub + another user: the copy says the app has no
+        // permission and does not offer a force clean.
+        let otherUser = GatewayFailure.portOccupied(
+            occupant: PortOccupant(name: "m365hub", pid: 74358, uid: foreignUID),
+            logTail: "")
+        check("m365hub foreign-user copy says no permission",
+              otherUser.reason.contains("无权") && otherUser.reason.contains("其他用户"))
+        check("m365hub foreign-user copy offers no force clean",
+              otherUser.reason.contains("强制清理并重试") == false)
+
+        // 19. A foreign process keeps the old honest wording.
+        check("foreign-process copy still refuses to kill others",
+              made.reason.contains("不敢乱杀"))
+
         try? FileManager.default.removeItem(at: logURL)
         try? FileManager.default.removeItem(at: bigURL)
 
